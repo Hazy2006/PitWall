@@ -1,7 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="x64" />
-    <Platform Name="x86" />
-  </Configurations>
-  <Project Path="PitWall.vcxproj" Id="8bee8099-4ae8-4106-b6bd-dd9e588e64ed" />
-</Solution>
