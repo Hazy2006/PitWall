@@ -1,0 +1,47 @@
+Dev log — July 17, 2026, PitWall Day 1
+
+Finally started PitWall for real.
+
+Set up the VS project, SQLite via sqlite3.h, decided on a
+domain/repository/service split (repo only knows domain stuff,
+storage handles raw SQL, service ties it together). Spent a while
+making sure I actually understood the direction of that chain and
+wasn't just repeating it.
+
+Built the Node hierarchy — Driver/Team/Circuit as subclasses,
+polymorphic via get_type_string(). Went back and forth on what
+data actually belongs on a node. First instinct was to throw in
+nationality, logos, etc., but caught myself — that's UI/SQL stuff,
+not graph stuff. Nodes only hold the math the Markov engine
+actually needs (tire_management_modifier, base_pace_delta, etc.).
+Killed StrategistNode for now since I don't know what it'd even
+hold yet.
+
+Edge struct has winRate, affinityScore, performanceDelta, and
+tirePreference. Almost made it an unordered_map keyed on
+pair<int, int> — turns out pair has no default hash, would've
+broken. Used a regular map instead.
+
+Graph itself keeps both successor and predecessor maps. Felt
+redundant at first, but otherwise removing a node means scanning
+the entire graph to find incoming edges. Reused this from the
+graphs lab I did earlier this year, just adapted it to hold real
+Node objects instead of bare ints.
+
+Got it compiling after two dumb mistakes:
+
+- Include path was wrong because Solution Explorer shows folders
+  that don't actually exist on disk (VS lets you fake folder
+  structure visually). Learned that the hard way.
+
+- Updated DriverNode's constructor to take new fields, then forgot
+  to update the make_shared call using it. Compiler complained way
+  down in some xutility internals file, which was confusing until
+  I realized it was just a constructor mismatch.
+
+Two tests passing: node creation/polymorphism, and edge
+add/get/is_edge.
+
+Still missing remove_node/remove_edge. I know exactly how they
+should work (predecessor scan, clean both maps, drop from costs
+too), just haven't coded them yet. That's next.
