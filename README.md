@@ -4,16 +4,55 @@ A graph database engine and F1 strategic intelligence system built from scratch 
 
 ## What
 
-PitWall models Formula 1 as a graph — drivers, teams, circuits, and strategists as nodes; historical relationships, win rates, and performance data as edges. On top of this, a Markov chain engine estimates race outcomes and computes optimal strategies in natural language.
+PitWall models Formula 1 as a graph — drivers, teams, and circuits as nodes; historical relationships, win rates, and performance data as edges. On top of this, a Markov chain engine estimates race outcomes and computes optimal strategies in natural language.
 
 The end goal: a system that tells you *why* Ferrari should pit at lap 34, not just that they should.
 
+## Tech Stack
+
+- **Language**: C++
+- **Persistence**: SQLite via raw C API (`sqlite3.h`)
+- **Config/lightweight data**: JSON
+- **IDE**: Visual Studio
+- **Testing**: TDD from day one — tests written before implementation, driving the design forward
+
 ## Core Architecture
 
-- **Graph engine** — hash maps + adjacency lists (predecessors, successors, edge weights) with full file persistence
-- **Circuit database** — per-circuit data with photos, layout characteristics, historical race results
-- **Markov chain layer** — transition probability estimation from historical data; models driver performance, tire degradation windows, championship scenarios
-- **Strategy report generator** — LLM layer translates numerical output into actionable team recommendations
+### Layering
+
+PitWall follows a strict layered architecture:
+
+- **Domain** — `Node` hierarchy (polymorphic: `DriverNode`, `TeamNode`, `CircuitNode`), `Edge` struct, `Graph` class (hash maps + adjacency lists with both successors and predecessors maps)
+- **Repository** — domain-aware data access layer, translates between domain objects and raw storage
+- **Storage** — raw SQLite execution, no domain awareness — Repository is the only caller
+- **Service** — orchestrates Repository and the Markov engine; never touches Storage directly
+
+Call chain: `Service → Repository → Storage → SQLite`
+
+### Graph Engine
+
+- Dual adjacency maps (successors + predecessors) for O(1) in/out-degree lookups
+- `Node` subclasses hold only Markov-relevant mathematical coefficients — display data (nationality, logos, photos) lives in SQLite and gets joined at render time by the UI layer
+- `Edge` struct with named weight fields: `winRate`, `affinityScore`, `performanceDelta`, `tirePreference`
+- Nodes are **immutable** once constructed — populated via constructor when the Repository builds the graph
+- Runtime-changing variables (current tire age, track temperature, fuel load) live in a separate `SimulationState` object passed through the Markov engine, never mutating the base graph
+
+### Circuit Database
+
+- Per-circuit data with layout characteristics and historical race results stored in SQLite
+- Circuit photos stored as files on disk; paths referenced in the database
+
+### Markov Chain Layer
+
+- **Trainer** — normalizes historical race data into transition probabilities
+- **Engine** — runs queries against the trained model at runtime
+- Pipeline: `Raw data source → Trainer (normalize counts) → Storage (JSON/DB) → Load → Engine → Client request → Output`
+- Transition probability estimation from historical data; models driver performance, tire degradation windows, championship scenarios
+
+### Strategy Report Generator
+
+- LLM layer translates numerical output into actionable team recommendations
+- **Observer pattern**: race state changes trigger automatic recomputation of strategy recommendations
 
 ## Example Outputs
 
@@ -33,12 +72,11 @@ The end goal: a system that tells you *why* Ferrari should pit at lap 34, not ju
 
 ## Graph Model
 
-| Node type | Examples |
-|---|---|
-| Driver | Leclerc, Verstappen, Norris |
-| Team | Ferrari, Red Bull, McLaren |
-| Circuit | Monaco, Interlagos, Abu Dhabi |
-| Strategist | TBD |
+| Node type | Examples | Markov-relevant fields |
+|---|---|---|
+| Driver | Leclerc, Verstappen, Norris | `tire_management_modifier`, `base_pace_delta` |
+| Team | Ferrari, Red Bull, McLaren | `strategy_aggressiveness` |
+| Circuit | Monaco, Interlagos, Abu Dhabi | `base_degradation_rate`, `pit_lane_time_loss` |
 
 Edges encode: historical win rates, driver-circuit affinity scores, team performance deltas, tire compound preferences.
 
@@ -49,7 +87,7 @@ Edges encode: historical win rates, driver-circuit affinity scores, team perform
 
 State = `(driver, circuit, lap, tire compound, position)`
 
-Transition probabilities estimated from historical F1 data (Ergast API). The model answers:
+Transition probabilities estimated from historical F1 data (Jolpica-F1 API, OpenF1). The model answers:
 - At which lap does switching compounds maximize P(win)?
 - Given current state, what is each driver's championship probability?
 - How does a safety car at lap X shift the outcome distribution?
@@ -59,17 +97,19 @@ Transition probabilities estimated from historical F1 data (Ergast API). The mod
 ## Data Sources
 
 - Jolpica-F1 API, OpenF1 — full historical race data, free
-- Circuit photos and layout files — stored with file persistence in PitWall DB
+- Circuit photos and layout files on disk, paths stored in SQLite
 
 ## Roadmap
 
-- [ ] Core graph engine — add/remove nodes, edges, file I/O
-- [ ] BFS, DFS, Dijkstra query support
-- [ ] Circuit database with photo storage
+- [x] Core graph engine — polymorphic node hierarchy, edge struct, add/remove nodes and edges
+- [x] TDD test suite — domain layer tests passing
+- [ ] Graph traversal — BFS, DFS, Dijkstra query support
+- [ ] SQLite integration — circuit database, persistence layer
 - [ ] Jolpica/OpenF1 data import pipeline
 - [ ] Markov chain transition probability estimation
 - [ ] Championship scenario simulator
 - [ ] Pit stop window optimizer
+- [ ] Observer pattern — strategy recomputation on state change
 - [ ] LLM strategy report generator
 - [ ] Markov chain extension for Semester 1 probability course
 
