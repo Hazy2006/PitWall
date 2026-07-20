@@ -26,3 +26,5 @@ public:
     bool is_edge(int x, int y) const;
     Edge get_edge(int x, int y) const;
 };
+
+//a
