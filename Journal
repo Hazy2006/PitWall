@@ -45,3 +45,31 @@ add/get/is_edge.
 Still missing remove_node/remove_edge. I know exactly how they
 should work (predecessor scan, clean both maps, drop from costs
 too), just haven't coded them yet. That's next.
+
+
+Dev Log — July 23, 2026
+
+PitWall — Phases 1-4 completed and verified
+
+What got done:
+
+Fixed DFS (was declared but never implemented) — iterative stack-based traversal
+Added remove_node() — cleans registry, adjacency maps, and incident edges
+Implemented Dijkstra for shortest-path queries
+Built SQLite persistence via Repository pattern (vcpkg-managed, not vendored) — full save/load round-trip, including a tricky ID-gap bug when nodes get removed before saving
+Built the data import pipeline: Python script pulls the real 2024 F1 season from the Jolpica API, C++ DataImporter reads it into the graph
+10/10 tests passing. Real data loaded: 59 nodes (25 drivers, 10 teams, 24 circuits), 479 edges with computed win rates
+Pushed everything to GitHub
+
+Bugs squashed:
+
+MSVC narrowing/aggregate-init errors (C2397/C2512) from sloppy Edge brace-init
+Stale debug .db file causing abort() on repeat test runs
+Wrong Jolpica API domain (was api.jolpica.com, should've been api.jolpi.ca)
+API pagination cutting results off at 100 instead of full season (needed ?limit=1000)
+
+Where it stands: Graph engine + SQLite + real F1 data all working end to end. 
+First time PitWall processed actual race data instead of test fixtures.
+
+Next up: Phase 5 — Markov transition model. Scoping down from the full (driver, circuit, lap, tire, position) state space to a (driver, circuit, grid_position) → 
+finish_position model, since one season isn't enough data to populate the full space meaningfully.
