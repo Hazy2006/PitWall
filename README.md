@@ -103,9 +103,9 @@ Transition probabilities estimated from historical F1 data (Jolpica-F1 API, Open
 
 - [x] Core graph engine — polymorphic node hierarchy, edge struct, add/remove nodes and edges
 - [x] TDD test suite — domain layer tests passing
-- [ ] Graph traversal — BFS, DFS, Dijkstra query support
-- [ ] SQLite integration — circuit database, persistence layer
-- [ ] Jolpica/OpenF1 data import pipeline
+- [x] Graph traversal — BFS, DFS, Dijkstra query support
+- [x] SQLite integration — circuit database, persistence layer
+- [x] Jolpica/OpenF1 data import pipeline
 - [ ] Markov chain transition probability estimation
 - [ ] Championship scenario simulator
 - [ ] Pit stop window optimizer
