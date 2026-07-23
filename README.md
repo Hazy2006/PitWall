@@ -10,7 +10,7 @@ The end goal: a system that tells you *why* Ferrari should pit at lap 34, not ju
 
 ## Tech Stack
 
-- **Language**: C++
+- **Language**: C++ (primary), Python
 - **Persistence**: SQLite via raw C API (`sqlite3.h`)
 - **Config/lightweight data**: JSON
 - **IDE**: Visual Studio
