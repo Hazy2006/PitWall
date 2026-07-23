@@ -5,3 +5,16 @@
 *.pdb
 *.user
 *.ipch
+x64/
+Win32/
+Debug/
+Release/
+
+# vcpkg manifest-mode build output
+vcpkg_installed/
+
+# Generated F1 data (fetched by scripts/fetch_f1_data.py, not source)
+data/
+
+# Generated inspection database
+*.db

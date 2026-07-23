@@ -1,0 +1,9 @@
+{
+  "name": "pitwallengine",
+  "version": "0.1.0",
+  "dependencies": [
+    "sqlite3",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "2475cc332a47b3a63bb3de58293bdab7726613ca"
+}
