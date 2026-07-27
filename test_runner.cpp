@@ -2,6 +2,7 @@
 #include "storage.h"
 #include "graph_repository.h"
 #include "data_importer.h"
+#include "markov_trainer.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -373,4 +374,53 @@ void test_real_import() {
     repo.create_tables();
     repo.save_graph(g);
     std::cout << "Saved graph to pitwall_f1.db\n";
+}
+
+void test_markov_trainer() {
+    std::cout << "--- Running MarkovTrainer Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_markov_trainer_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver One", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver Two", "circuit_name": "Circuit One", "position": 2, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver Three", "circuit_name": "Circuit One", "position": 1, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver Four", "circuit_name": "Circuit One", "position": 5, "grid": 0, "team_name": "Team One"},
+            {"driver_name": "Driver Five", "circuit_name": "Circuit One", "position": 3, "grid": 2, "team_name": "Team One"}
+        ])";
+    }
+
+    MarkovTrainer trainer;
+    trainer.train(results_path.string());
+
+    fs::remove_all(temp_dir);
+
+    const auto& counts = trainer.get_counts();
+
+    bool ok = true;
+    // grid 0 row must be filtered: only grid 1 and grid 2 keys should exist
+    ok &= (counts.size() == 2);
+    ok &= (counts.count(0) == 0);
+
+    // grid 1 -> finish 1: count 1, finish 2: count 1
+    ok &= (counts.at(1).at(1) == 1);
+    ok &= (counts.at(1).at(2) == 1);
+
+    // grid 2 -> finish 1: count 1, finish 3: count 1
+    ok &= (counts.at(2).at(1) == 1);
+    ok &= (counts.at(2).at(3) == 1);
+
+    ok &= (trainer.total_observations() == 4);
+
+    if (ok) {
+        std::cout << "[PASS] MarkovTrainer filtered grid==0 and counted transitions correctly.\n";
+    }
+    else {
+        std::cout << "[FAIL] MarkovTrainer counts did not match expectations.\n";
+    }
 }
