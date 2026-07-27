@@ -3,12 +3,14 @@
 #include "graph_repository.h"
 #include "data_importer.h"
 #include "markov_trainer.h"
+#include "markov_engine.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
 #include <vector>
 #include <fstream>
 #include <filesystem>
+#include <cmath>
 
 void run_domain_tests() {
     Graph g;
@@ -422,5 +424,54 @@ void test_markov_trainer() {
     }
     else {
         std::cout << "[FAIL] MarkovTrainer counts did not match expectations.\n";
+    }
+}
+
+void test_markov_engine() {
+    std::cout << "--- Running MarkovEngine Test ---\n";
+
+    std::map<int, std::map<int, int>> counts;
+    // grid 1: finish 1 x3, finish 2 x1  (total 4)
+    counts[1][1] = 3;
+    counts[1][2] = 1;
+    // grid 2: finish 1 x1, finish 3 x1  (total 2)
+    counts[2][1] = 1;
+    counts[2][3] = 1;
+
+    MarkovEngine engine(counts);
+
+    bool ok = true;
+    const double epsilon = 1e-9;
+
+    std::map<int, double> dist1 = engine.predict_finish_distribution(1);
+    ok &= (dist1.size() == 2);
+    ok &= (std::fabs(dist1.at(1) - 0.75) < epsilon);
+    ok &= (std::fabs(dist1.at(2) - 0.25) < epsilon);
+
+    double sum1 = 0.0;
+    for (const auto& [finish, prob] : dist1) {
+        sum1 += prob;
+    }
+    ok &= (std::fabs(sum1 - 1.0) < epsilon);
+
+    std::map<int, double> dist2 = engine.predict_finish_distribution(2);
+    double sum2 = 0.0;
+    for (const auto& [finish, prob] : dist2) {
+        sum2 += prob;
+    }
+    ok &= (std::fabs(sum2 - 1.0) < epsilon);
+
+    ok &= (engine.most_likely_finish(1) == 1);
+
+    // unseen grid position
+    std::map<int, double> dist_unseen = engine.predict_finish_distribution(99);
+    ok &= dist_unseen.empty();
+    ok &= (engine.most_likely_finish(99) == -1);
+
+    if (ok) {
+        std::cout << "[PASS] MarkovEngine normalized distributions and predicted correctly.\n";
+    }
+    else {
+        std::cout << "[FAIL] MarkovEngine output did not match expectations.\n";
     }
 }

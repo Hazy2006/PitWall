@@ -11,6 +11,7 @@ void test_save_and_load_with_id_gap();
 void test_data_importer();
 void test_real_import();
 void test_markov_trainer();
+void test_markov_engine();
 
 int main() {
 	std::cout << "=== Running PitWall Test Suite ===\n";
@@ -37,5 +38,7 @@ int main() {
 	test_real_import();
 	std::cout << "==================================\n";
 	test_markov_trainer();
+	std::cout << "==================================\n";
+	test_markov_engine();
 	return 0;
 }
