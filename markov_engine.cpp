@@ -1,4 +1,5 @@
 #include "markov_engine.h"
+#include <cmath>
 
 MarkovEngine::MarkovEngine(const std::map<int, std::map<int, int>>& transition_counts)
     : counts(transition_counts) {
@@ -44,4 +45,27 @@ int MarkovEngine::most_likely_finish(int grid_position) const {
         }
     }
     return best_finish;
+}
+
+std::map<int, double> MarkovEngine::predict_finish_distribution_for_driver(int grid_position, double driver_index) const {
+    std::map<int, double> pooled = predict_finish_distribution(grid_position);
+    if (pooled.empty()) {
+        return pooled;
+    }
+
+    int max_finish = pooled.rbegin()->first;
+    int shift = static_cast<int>(std::llround(driver_index));
+
+    std::map<int, double> shifted;
+    for (const auto& [finish, prob] : pooled) {
+        int new_finish = finish - shift;
+        if (new_finish < 1) {
+            new_finish = 1;
+        }
+        if (new_finish > max_finish) {
+            new_finish = max_finish;
+        }
+        shifted[new_finish] += prob;
+    }
+    return shifted;
 }

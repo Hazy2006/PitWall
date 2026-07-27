@@ -89,3 +89,8 @@ void DataImporter::import_results(const std::string& path) {
         graph.add_edge(driver_it->second, circuit_it->second, edge_data);
     }
 }
+
+int DataImporter::get_node_id(const std::string& name) const {
+    auto it = name_to_id.find(name);
+    return it == name_to_id.end() ? -1 : it->second;
+}

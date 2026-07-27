@@ -13,6 +13,24 @@
 #include <cmath>
 #include <algorithm>
 
+namespace {
+    // Thin integration helper: writes computed driver performance indices into
+    // each DriverNode's base_pace_delta (param2). Keeps MarkovTrainer/MarkovEngine
+    // free of any Graph dependency, per the layering rule.
+    void apply_driver_indices(Graph& g, const DataImporter& importer, const std::map<std::string, double>& indices) {
+        for (const auto& [name, index] : indices) {
+            int id = importer.get_node_id(name);
+            if (id < 0) {
+                continue;
+            }
+            auto driver_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(id));
+            if (driver_node) {
+                driver_node->base_pace_delta = index;
+            }
+        }
+    }
+}
+
 void run_domain_tests() {
     Graph g;
 
@@ -503,6 +521,175 @@ void test_markov_real() {
         for (size_t i = 0; i < sorted_by_prob.size() && i < 3; ++i) {
             std::cout << "    finish " << sorted_by_prob[i].first
                        << " : " << sorted_by_prob[i].second << "\n";
+        }
+    }
+}
+
+void test_driver_index() {
+    std::cout << "--- Running Driver Performance Index Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_driver_index_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Alpha", "circuit_name": "Circuit One", "position": 2, "grid": 5, "team_name": "Team One"},
+            {"driver_name": "Alpha", "circuit_name": "Circuit Two", "position": 4, "grid": 8, "team_name": "Team One"},
+            {"driver_name": "Alpha", "circuit_name": "Circuit Three", "position": 10, "grid": 0, "team_name": "Team One"},
+            {"driver_name": "Beta", "circuit_name": "Circuit One", "position": 6, "grid": 3, "team_name": "Team Two"},
+            {"driver_name": "Beta", "circuit_name": "Circuit Two", "position": 2, "grid": 1, "team_name": "Team Two"},
+            {"driver_name": "Gamma", "circuit_name": "Circuit One", "position": 9, "grid": 0, "team_name": "Team Three"}
+        ])";
+    }
+
+    MarkovTrainer trainer;
+    std::map<std::string, double> indices = trainer.compute_driver_indices(results_path.string());
+
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    // Alpha: (5-2)=3, (8-4)=4, grid==0 row filtered -> mean = 3.5
+    ok &= (indices.count("Alpha") == 1);
+    ok &= (std::fabs(indices.at("Alpha") - 3.5) < epsilon);
+
+    // Beta: (3-6)=-3, (1-2)=-1 -> mean = -2.0
+    ok &= (indices.count("Beta") == 1);
+    ok &= (std::fabs(indices.at("Beta") - (-2.0)) < epsilon);
+
+    // Gamma: only a grid==0 row -> zero valid rows -> index 0.0, but still present
+    ok &= (indices.count("Gamma") == 1);
+    ok &= (std::fabs(indices.at("Gamma") - 0.0) < epsilon);
+
+    if (ok) {
+        std::cout << "[PASS] compute_driver_indices computed correct means and filtered grid==0 rows.\n";
+    }
+    else {
+        std::cout << "[FAIL] compute_driver_indices output did not match expectations.\n";
+    }
+}
+
+void test_driver_aware_prediction() {
+    std::cout << "--- Running Driver-Aware Prediction Test ---\n";
+
+    std::map<int, std::map<int, int>> counts;
+    // grid 1: finish 1 x2, finish 2 x2, finish 3 x4 (total 8)
+    counts[1][1] = 2;
+    counts[1][2] = 2;
+    counts[1][3] = 4;
+
+    MarkovEngine engine(counts);
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    // Pooled: {1: 0.25, 2: 0.25, 3: 0.5}
+    // driver_index = +1.0 (gains 1 position) shifts every bucket down by 1:
+    // finish 1 -> clamped to 1, finish 2 -> 1, finish 3 -> 2
+    // Result: {1: 0.5, 2: 0.5}
+    std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(1, 1.0);
+
+    ok &= (shifted.size() == 2);
+    ok &= (shifted.count(1) == 1);
+    ok &= (std::fabs(shifted.at(1) - 0.5) < epsilon);
+    ok &= (shifted.count(2) == 1);
+    ok &= (std::fabs(shifted.at(2) - 0.5) < epsilon);
+
+    double sum = 0.0;
+    for (const auto& [finish, prob] : shifted) {
+        ok &= (finish >= 1);
+        sum += prob;
+    }
+    ok &= (std::fabs(sum - 1.0) < epsilon);
+
+    // Large positive index clamps everything to P1.
+    std::map<int, double> fully_clamped = engine.predict_finish_distribution_for_driver(1, 10.0);
+    ok &= (fully_clamped.size() == 1);
+    ok &= (fully_clamped.count(1) == 1);
+    ok &= (std::fabs(fully_clamped.at(1) - 1.0) < epsilon);
+
+    // Unseen grid position returns an empty map, no throw.
+    std::map<int, double> unseen = engine.predict_finish_distribution_for_driver(99, 2.0);
+    ok &= unseen.empty();
+
+    if (ok) {
+        std::cout << "[PASS] predict_finish_distribution_for_driver shifted mass correctly and respected the P1 clamp.\n";
+    }
+    else {
+        std::cout << "[FAIL] predict_finish_distribution_for_driver output did not match expectations.\n";
+    }
+}
+
+void test_driver_index_real() {
+    std::cout << "--- Running Real Data Driver Index Smoke Test ---\n";
+
+    MarkovTrainer trainer;
+    trainer.train("data/results.json");
+    std::map<std::string, double> indices = trainer.compute_driver_indices("data/results.json");
+
+    std::vector<std::pair<std::string, double>> sorted_indices(indices.begin(), indices.end());
+    std::sort(sorted_indices.begin(), sorted_indices.end(),
+        [](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b) {
+            return a.second > b.second;
+        });
+
+    std::cout << "Top 5 drivers by performance index (positions gained/lost):\n";
+    for (size_t i = 0; i < sorted_indices.size() && i < 5; ++i) {
+        std::cout << "  " << sorted_indices[i].first << " : " << sorted_indices[i].second << "\n";
+    }
+
+    std::cout << "Bottom 5 drivers by performance index:\n";
+    for (size_t i = 0; i < sorted_indices.size() && i < 5; ++i) {
+        size_t idx = sorted_indices.size() - 1 - i;
+        std::cout << "  " << sorted_indices[idx].first << " : " << sorted_indices[idx].second << "\n";
+    }
+
+    // Part C: write the indices into the graph (param2 on DriverNode) via the
+    // thin integration helper, keeping MarkovTrainer/MarkovEngine Graph-free.
+    Graph g;
+    DataImporter importer(g);
+    importer.import_drivers("data/drivers.json");
+    apply_driver_indices(g, importer, indices);
+
+    MarkovEngine engine(trainer.get_counts());
+
+    auto print_distribution = [](const std::string& label, const std::map<int, double>& dist) {
+        std::vector<std::pair<int, double>> sorted_by_prob(dist.begin(), dist.end());
+        std::sort(sorted_by_prob.begin(), sorted_by_prob.end(),
+            [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                return a.second > b.second;
+            });
+        std::cout << "  " << label << ":\n";
+        for (size_t i = 0; i < sorted_by_prob.size() && i < 5; ++i) {
+            std::cout << "    finish " << sorted_by_prob[i].first
+                       << " : " << sorted_by_prob[i].second << "\n";
+        }
+    };
+
+    std::map<int, double> pooled_p5 = engine.predict_finish_distribution(5);
+
+    if (!sorted_indices.empty()) {
+        const std::string& strong_driver = sorted_indices.front().first;
+        const std::string& weak_driver = sorted_indices.back().first;
+
+        int strong_id = importer.get_node_id(strong_driver);
+        int weak_id = importer.get_node_id(weak_driver);
+
+        std::cout << "Strong driver: " << strong_driver << " (index " << sorted_indices.front().second << ")\n";
+        print_distribution("Pooled P5 distribution", pooled_p5);
+        if (strong_id >= 0) {
+            auto strong_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(strong_id));
+            print_distribution("Driver-aware P5 distribution", engine.predict_finish_distribution_for_driver(5, strong_node->base_pace_delta));
+        }
+
+        std::cout << "Weak driver: " << weak_driver << " (index " << sorted_indices.back().second << ")\n";
+        print_distribution("Pooled P5 distribution", pooled_p5);
+        if (weak_id >= 0) {
+            auto weak_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(weak_id));
+            print_distribution("Driver-aware P5 distribution", engine.predict_finish_distribution_for_driver(5, weak_node->base_pace_delta));
         }
     }
 }
