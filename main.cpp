@@ -12,6 +12,7 @@ void test_data_importer();
 void test_real_import();
 void test_markov_trainer();
 void test_markov_engine();
+void test_markov_real();
 
 int main() {
 	std::cout << "=== Running PitWall Test Suite ===\n";
@@ -36,6 +37,8 @@ int main() {
 	test_data_importer();
 	std::cout << "==================================\n";
 	test_real_import();
+	std::cout << "==================================\n";
+	test_markov_real();
 	std::cout << "==================================\n";
 	test_markov_trainer();
 	std::cout << "==================================\n";
