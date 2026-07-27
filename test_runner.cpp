@@ -11,6 +11,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cmath>
+#include <algorithm>
 
 void run_domain_tests() {
     Graph g;
@@ -473,5 +474,35 @@ void test_markov_engine() {
     }
     else {
         std::cout << "[FAIL] MarkovEngine output did not match expectations.\n";
+    }
+}
+
+void test_markov_real() {
+    std::cout << "--- Running Real Data MarkovTrainer Smoke Test ---\n";
+
+    MarkovTrainer trainer;
+    trainer.train("data/results.json");
+
+    std::cout << "Total observations: " << trainer.total_observations() << "\n";
+
+    MarkovEngine engine(trainer.get_counts());
+
+    for (int grid : {1, 5, 10, 15}) {
+        int best = engine.most_likely_finish(grid);
+        std::cout << "Grid " << grid << " -> most likely finish: " << best << "\n";
+
+        std::map<int, double> distribution = engine.predict_finish_distribution(grid);
+
+        std::vector<std::pair<int, double>> sorted_by_prob(distribution.begin(), distribution.end());
+        std::sort(sorted_by_prob.begin(), sorted_by_prob.end(),
+            [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
+                return a.second > b.second;
+            });
+
+        std::cout << "  Top " << (sorted_by_prob.size() < 3 ? sorted_by_prob.size() : 3) << " finishes:\n";
+        for (size_t i = 0; i < sorted_by_prob.size() && i < 3; ++i) {
+            std::cout << "    finish " << sorted_by_prob[i].first
+                       << " : " << sorted_by_prob[i].second << "\n";
+        }
     }
 }
