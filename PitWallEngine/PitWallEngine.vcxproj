@@ -150,6 +150,7 @@
     <ClInclude Include="..\storage.h" />
     <ClInclude Include="..\data_importer.h" />
     <ClInclude Include="..\markov_trainer.h" />
+    <ClInclude Include="..\markov_engine.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
@@ -159,6 +160,7 @@
     <ClCompile Include="..\storage.cpp" />
     <ClCompile Include="..\data_importer.cpp" />
     <ClCompile Include="..\markov_trainer.cpp" />
+    <ClCompile Include="..\markov_engine.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
