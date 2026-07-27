@@ -13,6 +13,9 @@ void test_real_import();
 void test_markov_trainer();
 void test_markov_engine();
 void test_markov_real();
+void test_driver_index();
+void test_driver_aware_prediction();
+void test_driver_index_real();
 
 int main() {
 	std::cout << "=== Running PitWall Test Suite ===\n";
@@ -40,8 +43,14 @@ int main() {
 	std::cout << "==================================\n";
 	test_markov_real();
 	std::cout << "==================================\n";
+	test_driver_index_real();
+	std::cout << "==================================\n";
 	test_markov_trainer();
 	std::cout << "==================================\n";
 	test_markov_engine();
+	std::cout << "==================================\n";
+	test_driver_index();
+	std::cout << "==================================\n";
+	test_driver_aware_prediction();
 	return 0;
 }

@@ -15,4 +15,7 @@ public:
     void import_teams(const std::string& path);
     void import_circuits(const std::string& path);
     void import_results(const std::string& path);
+
+    // Returns the node id for a previously imported name, or -1 if unknown.
+    int get_node_id(const std::string& name) const;
 };
