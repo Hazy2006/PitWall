@@ -85,7 +85,7 @@ void DataImporter::import_results(const std::string& path) {
         }
 
         double win_rate = static_cast<double>(stats.wins) / static_cast<double>(stats.total);
-        Edge edge_data{ win_rate, 0.0, 0.0, 0.0 };
+        Edge edge_data{ win_rate };
         graph.add_edge(driver_it->second, circuit_it->second, edge_data);
     }
 }
