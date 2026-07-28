@@ -4,6 +4,7 @@
 #include "data_importer.h"
 #include "markov_trainer.h"
 #include "markov_engine.h"
+#include "strategy_reporter.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -777,4 +778,102 @@ void test_driver_index_real() {
             print_distribution_sum("Driver-aware P5 distribution", weak_dist);
         }
     }
+}
+
+void test_strategy_reporter() {
+    std::cout << "--- Running Strategy Reporter Test ---\n";
+    bool ok = true;
+
+    // Pooled grid 5: finish 4 x5 (50%), finish 6 x3 (30%), finish 8 x2 (20%), total 10.
+    std::map<int, std::map<int, int>> counts;
+    counts[5][4] = 5;
+    counts[5][6] = 3;
+    counts[5][8] = 2;
+    MarkovEngine engine(counts);
+
+    std::map<std::string, double> indices;
+    indices["Test Driver"] = 1.85; // rounds to 1.9
+
+    StrategyReporter reporter(engine, indices);
+
+    // --- Known driver: correct most-likely finish, percentage, and adjustment ---
+    std::string report = reporter.report_single(5, "Test Driver");
+
+    // Pooled prediction: most likely finish is P4 at 50%.
+    ok &= (report.find("P4") != std::string::npos);
+    ok &= (report.find("50%") != std::string::npos);
+
+    // Distribution shape: next two outcomes, P6 (30%) and P8 (20%).
+    ok &= (report.find("P6") != std::string::npos);
+    ok &= (report.find("30%") != std::string::npos);
+    ok &= (report.find("P8") != std::string::npos);
+    ok &= (report.find("20%") != std::string::npos);
+
+    // Driver adjustment: index rounded to 1 decimal, and the actual
+    // shifted most-likely finish computed via predict_finish_distribution_for_driver
+    // (pooled {4:0.5,6:0.3,8:0.2} shifted by 1.85 -> most mass, 0.425, lands on P2).
+    ok &= (report.find("Test Driver tends to gain 1.9 positions") != std::string::npos);
+    ok &= (report.find("P2") != std::string::npos);
+
+    if (!ok) {
+        std::cout << "[FAIL] Known-driver report missing expected content: " << report << "\n";
+    }
+
+    // --- Driver NOT in the index map: honest "no adjustment" path ---
+    std::string unindexed_report = reporter.report_single(5, "Nobody Special");
+    bool unindexed_ok = true;
+    unindexed_ok &= (unindexed_report.find("No driver-specific adjustment is available for Nobody Special") != std::string::npos);
+    unindexed_ok &= (unindexed_report.find("fewer than 10 races") != std::string::npos);
+    // Must not fabricate an index or a shifted-finish claim for this driver.
+    unindexed_ok &= (unindexed_report.find("tends to") == std::string::npos);
+    unindexed_ok &= (unindexed_report.find("shifting") == std::string::npos);
+    ok &= unindexed_ok;
+
+    if (!unindexed_ok) {
+        std::cout << "[FAIL] Unindexed-driver report was not honest about missing data: " << unindexed_report << "\n";
+    }
+
+    // --- Unseen grid position: clear "no data" message, no fabrication ---
+    std::string no_data_report = reporter.report_single(99, "Test Driver");
+    bool no_data_ok = (no_data_report.find("No historical data") != std::string::npos)
+        && (no_data_report.find("P99") != std::string::npos);
+    ok &= no_data_ok;
+
+    if (!no_data_ok) {
+        std::cout << "[FAIL] Unseen grid position did not return a clear no-data message: " << no_data_report << "\n";
+    }
+
+    if (ok) {
+        std::cout << "[PASS] StrategyReporter reported correct percentages, distribution shape, "
+                     "an honest driver adjustment, an honest no-adjustment path, and an honest no-data path.\n";
+    }
+}
+
+void test_strategy_reporter_real() {
+    std::cout << "--- Running Real Data Strategy Reporter Smoke Test ---\n";
+
+    MarkovTrainer trainer;
+    trainer.train("data/results.json");
+    std::map<std::string, double> indices = trainer.compute_driver_indices("data/results.json");
+    MarkovEngine engine(trainer.get_counts());
+    StrategyReporter reporter(engine, indices);
+
+    std::vector<std::pair<std::string, double>> sorted_indices(indices.begin(), indices.end());
+    std::sort(sorted_indices.begin(), sorted_indices.end(),
+        [](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b) {
+            return a.second > b.second;
+        });
+
+    std::cout << "\nLeclerc, starting P3:\n  " << reporter.report_single(3, "Charles Leclerc") << "\n";
+
+    if (!sorted_indices.empty()) {
+        const std::string& strong_driver = sorted_indices.front().first;
+        std::cout << "\n" << strong_driver << " (strongest index), starting P5:\n  "
+                   << reporter.report_single(5, strong_driver) << "\n";
+    }
+
+    std::cout << "\nOliver Bearman (filtered out, <10 races), starting P10:\n  "
+               << reporter.report_single(10, "Oliver Bearman") << "\n";
+
+    std::cout << "\nVerstappen, starting P1:\n  " << reporter.report_single(1, "Max Verstappen") << "\n";
 }
