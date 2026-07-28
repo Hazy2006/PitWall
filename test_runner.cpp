@@ -601,8 +601,9 @@ void test_driver_aware_prediction() {
     bool ok = true;
 
     // Pooled: {1: 0.25, 2: 0.25, 3: 0.5}
-    // driver_index = +1.0 (gains 1 position) shifts every bucket down by 1:
-    // finish 1 -> clamped to 1, finish 2 -> 1, finish 3 -> 2
+    // driver_index = +1.0 is an exact integer shift (no fractional split):
+    // finish 1 -> target 0 -> clamped to 1, finish 2 -> target 1 -> 1,
+    // finish 3 -> target 2 -> 2
     // Result: {1: 0.5, 2: 0.5}
     std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(1, 1.0);
 
@@ -629,8 +630,66 @@ void test_driver_aware_prediction() {
     std::map<int, double> unseen = engine.predict_finish_distribution_for_driver(99, 2.0);
     ok &= unseen.empty();
 
+    // --- Fractional shift with mass interpolation ---
+    std::map<int, std::map<int, int>> counts2;
+    // grid 5: finish 2 x2 (0.2), finish 5 x3 (0.3), finish 8 x5 (0.5), total 10
+    counts2[5][2] = 2;
+    counts2[5][5] = 3;
+    counts2[5][8] = 5;
+
+    MarkovEngine engine2(counts2);
+
+    // Pooled: {2: 0.2, 5: 0.3, 8: 0.5}, max_finish = 8, driver_index = 2.4
+    // finish 2: target = 2 - 2.4 = -0.4 -> lo=-1, hi=0, both clamp to 1
+    //           -> shifted[1] += 0.2 * 1.0 = 0.2
+    // finish 5: target = 5 - 2.4 = 2.6 -> lo=2, hi=3, no clamping needed
+    //           -> shifted[2] += 0.3 * 0.4 = 0.12, shifted[3] += 0.3 * 0.6 = 0.18
+    // finish 8: target = 8 - 2.4 = 5.6 -> lo=5, hi=6, no clamping needed
+    //           -> shifted[5] += 0.5 * 0.4 = 0.2, shifted[6] += 0.5 * 0.6 = 0.3
+    // Result: {1: 0.2, 2: 0.12, 3: 0.18, 5: 0.2, 6: 0.3}
+    std::map<int, double> fractional = engine2.predict_finish_distribution_for_driver(5, 2.4);
+
+    ok &= (fractional.size() == 5);
+    ok &= (fractional.count(1) == 1) && (std::fabs(fractional.at(1) - 0.2) < epsilon);
+    ok &= (fractional.count(2) == 1) && (std::fabs(fractional.at(2) - 0.12) < epsilon);
+    ok &= (fractional.count(3) == 1) && (std::fabs(fractional.at(3) - 0.18) < epsilon);
+    ok &= (fractional.count(5) == 1) && (std::fabs(fractional.at(5) - 0.2) < epsilon);
+    ok &= (fractional.count(6) == 1) && (std::fabs(fractional.at(6) - 0.3) < epsilon);
+
+    double fractional_sum = 0.0;
+    for (const auto& [finish, prob] : fractional) {
+        ok &= (finish >= 1 && finish <= 8);
+        fractional_sum += prob;
+    }
+    ok &= (std::fabs(fractional_sum - 1.0) < epsilon);
+
+    // A fractional index must NOT collapse to the same result as its rounded
+    // integer counterpart -- this is the whole point of dropping std::llround.
+    // On the grid-1 pooled distribution {1: 0.25, 2: 0.25, 3: 0.5}:
+    //   index 1.5 -> finish 1: target -0.5 -> clamps to 1 (mass 0.25)
+    //                finish 2: target  0.5 -> lo=0/hi=1, both clamp to 1 (mass 0.25)
+    //                finish 3: target  1.5 -> lo=1/hi=2, split 0.5/0.5 (mass 0.5)
+    //                Result: {1: 0.75, 2: 0.25}
+    //   index 2.0 -> every target is an exact integer <= 1 -> fully clamped to P1
+    //                Result: {1: 1.0}
+    // Under the old std::llround-based shift both 1.5 and 2.0 rounded to the
+    // same integer shift and produced an identical distribution; they must
+    // now differ.
+    std::map<int, double> frac_index = engine.predict_finish_distribution_for_driver(1, 1.5);
+    std::map<int, double> rounded_index = engine.predict_finish_distribution_for_driver(1, 2.0);
+
+    ok &= (frac_index.size() == 2);
+    ok &= (frac_index.count(1) == 1) && (std::fabs(frac_index.at(1) - 0.75) < epsilon);
+    ok &= (frac_index.count(2) == 1) && (std::fabs(frac_index.at(2) - 0.25) < epsilon);
+
+    ok &= (rounded_index.size() == 1);
+    ok &= (rounded_index.count(1) == 1) && (std::fabs(rounded_index.at(1) - 1.0) < epsilon);
+
+    ok &= (frac_index != rounded_index);
+
     if (ok) {
-        std::cout << "[PASS] predict_finish_distribution_for_driver shifted mass correctly and respected the P1 clamp.\n";
+        std::cout << "[PASS] predict_finish_distribution_for_driver split fractional mass correctly, "
+                     "respected the P1 clamp, conserved total probability, and diverged from its rounded counterpart.\n";
     }
     else {
         std::cout << "[FAIL] predict_finish_distribution_for_driver output did not match expectations.\n";
@@ -683,6 +742,14 @@ void test_driver_index_real() {
         }
     };
 
+    auto print_distribution_sum = [](const std::string& label, const std::map<int, double>& dist) {
+        double sum = 0.0;
+        for (const auto& [finish, prob] : dist) {
+            sum += prob;
+        }
+        std::cout << "  " << label << " total probability mass: " << sum << "\n";
+    };
+
     std::map<int, double> pooled_p5 = engine.predict_finish_distribution(5);
 
     if (!sorted_indices.empty()) {
@@ -696,14 +763,18 @@ void test_driver_index_real() {
         print_distribution("Pooled P5 distribution", pooled_p5);
         if (strong_id >= 0) {
             auto strong_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(strong_id));
-            print_distribution("Driver-aware P5 distribution", engine.predict_finish_distribution_for_driver(5, strong_node->base_pace_delta));
+            std::map<int, double> strong_dist = engine.predict_finish_distribution_for_driver(5, strong_node->base_pace_delta);
+            print_distribution("Driver-aware P5 distribution", strong_dist);
+            print_distribution_sum("Driver-aware P5 distribution", strong_dist);
         }
 
         std::cout << "Weak driver: " << weak_driver << " (index " << sorted_indices.back().second << ")\n";
         print_distribution("Pooled P5 distribution", pooled_p5);
         if (weak_id >= 0) {
             auto weak_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(weak_id));
-            print_distribution("Driver-aware P5 distribution", engine.predict_finish_distribution_for_driver(5, weak_node->base_pace_delta));
+            std::map<int, double> weak_dist = engine.predict_finish_distribution_for_driver(5, weak_node->base_pace_delta);
+            print_distribution("Driver-aware P5 distribution", weak_dist);
+            print_distribution_sum("Driver-aware P5 distribution", weak_dist);
         }
     }
 }

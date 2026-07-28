@@ -1,5 +1,6 @@
 #include "markov_engine.h"
 #include <cmath>
+#include <algorithm>
 
 MarkovEngine::MarkovEngine(const std::map<int, std::map<int, int>>& transition_counts)
     : counts(transition_counts) {
@@ -54,18 +55,23 @@ std::map<int, double> MarkovEngine::predict_finish_distribution_for_driver(int g
     }
 
     int max_finish = pooled.rbegin()->first;
-    int shift = static_cast<int>(std::llround(driver_index));
 
     std::map<int, double> shifted;
     for (const auto& [finish, prob] : pooled) {
-        int new_finish = finish - shift;
-        if (new_finish < 1) {
-            new_finish = 1;
-        }
-        if (new_finish > max_finish) {
-            new_finish = max_finish;
-        }
-        shifted[new_finish] += prob;
+        double target = static_cast<double>(finish) - driver_index;
+        int lo = static_cast<int>(std::floor(target));
+        int hi = static_cast<int>(std::ceil(target));
+
+        // frac_lo + frac_hi always sums to 1.0, including when target is an
+        // exact integer (lo == hi, frac_hi == 0.0, all mass goes to lo).
+        double frac_hi = target - lo;
+        double frac_lo = 1.0 - frac_hi;
+
+        int clamped_lo = std::clamp(lo, 1, max_finish);
+        int clamped_hi = std::clamp(hi, 1, max_finish);
+
+        shifted[clamped_lo] += prob * frac_lo;
+        shifted[clamped_hi] += prob * frac_hi;
     }
     return shifted;
 }
