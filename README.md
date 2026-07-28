@@ -64,13 +64,14 @@ Bearman has fewer than 10 races in the dataset.
 PitWall follows a strict layered architecture.
 
 ```
-Markov Engine
-      │
-Repository
-      │
-Storage
-      │
-SQLite
+Persistence stack:          Markov stack (standalone):
+  Repository                   MarkovTrainer
+     |                            |
+  Storage                     MarkovEngine
+     |                            |
+  SQLite                      StrategyReporter
+
+  Graph (domain) ← DataImporter fills it
 ```
 
 ### Domain
