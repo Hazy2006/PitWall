@@ -45,6 +45,8 @@ int MarkovTrainer::total_observations() const {
 }
 
 std::map<std::string, double> MarkovTrainer::compute_driver_indices(const std::string& results_json_path) const {
+    constexpr int kMinValidRows = 10;
+
     json data = load_json_array(results_json_path);
 
     std::map<std::string, double> sum_by_driver;
@@ -52,10 +54,6 @@ std::map<std::string, double> MarkovTrainer::compute_driver_indices(const std::s
 
     for (const auto& entry : data) {
         std::string driver = entry.at("driver_name").get<std::string>();
-        // Touch both maps so every driver appears in the output even if all
-        // of their rows get filtered below (grid == 0 -> zero valid rows).
-        sum_by_driver[driver] += 0.0;
-        count_by_driver[driver] += 0;
 
         int grid = entry.at("grid").get<int>();
         if (grid == 0) {
@@ -68,7 +66,10 @@ std::map<std::string, double> MarkovTrainer::compute_driver_indices(const std::s
 
     std::map<std::string, double> indices;
     for (const auto& [driver, count] : count_by_driver) {
-        indices[driver] = (count == 0) ? 0.0 : (sum_by_driver.at(driver) / static_cast<double>(count));
+        if (count < kMinValidRows) {
+            continue;
+        }
+        indices[driver] = sum_by_driver.at(driver) / static_cast<double>(count);
     }
     return indices;
 }

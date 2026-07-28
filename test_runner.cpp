@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <cmath>
 #include <algorithm>
+#include <sstream>
 
 namespace {
     // Thin integration helper: writes computed driver performance indices into
@@ -62,9 +63,6 @@ void run_edge_tests() {
 
     Edge stats = {
         0.15,  // winRate
-        0.90,  // affinityScore
-        -0.1,  // performanceDelta
-        1.0    // tirePreference
     };
 
     g.add_edge(driver_id, circuit_id, stats);
@@ -74,7 +72,7 @@ void run_edge_tests() {
     assert(g.is_edge(circuit_id, driver_id) == false);
 
     Edge retrieved = g.get_edge(driver_id, circuit_id);
-    assert(retrieved.affinityScore == 0.90);
+    assert(retrieved.winRate == 0.15);
 
     std::cout << "Edge Routing Tests Passed!\n";
 }
@@ -87,8 +85,8 @@ void test_bfs() {
     int id2 = g.add_node(std::make_shared<DriverNode>("Node2", 0.0, 0.0));
     int id3 = g.add_node(std::make_shared<DriverNode>("Node3", 0.0, 0.0));
 
-    g.add_edge(id1, id2, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(id2, id3, Edge{ 0.0, 1.0, 0.0, 0.0 });
+    g.add_edge(id1, id2, Edge{ 1.0 });
+    g.add_edge(id2, id3, Edge{ 1.0 });
 
     std::vector<int> visited = g.bfs(id1);
 
@@ -110,9 +108,9 @@ void test_dfs() {
     int d = g.add_node(std::make_shared<DriverNode>("N4",13.0,1.0));
 
 
-    g.add_edge(a, b, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(b, d, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(a, c, Edge{ 0.0, 1.0, 0.0, 0.0 });
+    g.add_edge(a, b, Edge{ 1.0 });
+    g.add_edge(b, d, Edge{ 1.0 });
+    g.add_edge(a, c, Edge{ 1.0 });
 
     std::vector<int> visited = g.dfs(a);
     if (visited.size() == 4 && visited[0] == a && visited[1] == b && visited[2] == d && visited[3] == c) {
@@ -131,9 +129,9 @@ void test_remove_node() {
     int b = g.add_node(std::make_shared<DriverNode>("N2", 11.0, 1.0));
     int c = g.add_node(std::make_shared<DriverNode>("N3", 12.0, 1.0));
 
-    g.add_edge(a, b, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(b, c, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(a, c, Edge{ 0.0, 1.0, 0.0, 0.0 });
+    g.add_edge(a, b, Edge{ 1.0 });
+    g.add_edge(b, c, Edge{ 1.0 });
+    g.add_edge(a, c, Edge{ 1.0 });
 
     g.remove_node(b);
 
@@ -175,10 +173,10 @@ void test_dijkstra() {
     int c = g.add_node(std::make_shared<DriverNode>("N3", 0.0, 0.0));
     int d = g.add_node(std::make_shared<DriverNode>("N4", 0.0, 0.0));
 
-    g.add_edge(a, b, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(b, d, Edge{ 0.0, 1.0, 0.0, 0.0 });
-    g.add_edge(a, c, Edge{ 0.0, 5.0, 0.0, 0.0 });
-    g.add_edge(c, d, Edge{ 0.0, 1.0, 0.0, 0.0 });
+    g.add_edge(a, b, Edge{ 1.0 });
+    g.add_edge(b, d, Edge{ 1.0 });
+    g.add_edge(a, c, Edge{ 5.0 });
+    g.add_edge(c, d, Edge{ 1.0 });
 
     std::vector<int> path = g.dijkstra(a, d);
 
@@ -198,9 +196,9 @@ void test_save_and_load() {
     int team_id = original.add_node(std::make_shared<TeamNode>("Ferrari", 2.1));
     int circuit_id = original.add_node(std::make_shared<CircuitNode>("Monaco", 1.2));
 
-    original.add_edge(driver_id, team_id, Edge{ 0.62, 0.90, -0.1, 1.0 });
-    original.add_edge(driver_id, circuit_id, Edge{ 0.15, 0.75, 0.05, 0.5 });
-    original.add_edge(team_id, circuit_id, Edge{ 0.40, 0.60, 0.0, 0.25 });
+    original.add_edge(driver_id, team_id, Edge{ 0.62 });
+    original.add_edge(driver_id, circuit_id, Edge{ 0.15 });
+    original.add_edge(team_id, circuit_id, Edge{ 0.40 });
 
     Storage storage(":memory:");
     GraphRepository repo(storage);
@@ -230,13 +228,13 @@ void test_save_and_load() {
     ok &= (circuit != nullptr && circuit->base_degradation_rate == 1.2);
 
     Edge e1 = loaded.get_edge(driver_id, team_id);
-    ok &= (e1.winRate == 0.62 && e1.affinityScore == 0.90 && e1.performanceDelta == -0.1 && e1.tirePreference == 1.0);
+    ok &= (e1.winRate == 0.62);
 
     Edge e2 = loaded.get_edge(driver_id, circuit_id);
-    ok &= (e2.winRate == 0.15 && e2.affinityScore == 0.75 && e2.performanceDelta == 0.05 && e2.tirePreference == 0.5);
+    ok &= (e2.winRate == 0.15);
 
     Edge e3 = loaded.get_edge(team_id, circuit_id);
-    ok &= (e3.winRate == 0.40 && e3.affinityScore == 0.60 && e3.performanceDelta == 0.0 && e3.tirePreference == 0.25);
+    ok &= (e3.winRate == 0.40);
 
     if (ok) {
         std::cout << "[PASS] Graph round-tripped through SQLite repository intact.\n";
@@ -254,7 +252,7 @@ void test_save_and_load_with_id_gap() {
     int b = original.add_node(std::make_shared<DriverNode>("N2", 3.0, 4.0));
     int c = original.add_node(std::make_shared<DriverNode>("N3", 5.0, 6.0));
 
-    original.add_edge(a, c, Edge{ 0.20, 0.30, 0.40, 0.50 });
+    original.add_edge(a, c, Edge{ 0.20 });
 
     original.remove_node(b);
 
@@ -281,7 +279,7 @@ void test_save_and_load_with_id_gap() {
     }
 
     Edge e = loaded.get_edge(a, c);
-    ok &= (e.winRate == 0.20 && e.affinityScore == 0.30 && e.performanceDelta == 0.40 && e.tirePreference == 0.50);
+    ok &= (e.winRate == 0.20);
 
     if (ok) {
         std::cout << "[PASS] Save/load preserved node IDs across a removal gap.\n";
@@ -389,12 +387,22 @@ void test_real_import() {
         std::cout << "  [" << id << "] " << node->get_name() << " (" << node->get_type_string() << ")\n";
     }
 
-    std::filesystem::remove("pitwall_f1.db");
-    Storage storage("pitwall_f1.db");
-    GraphRepository repo(storage);
-    repo.create_tables();
-    repo.save_graph(g);
-    std::cout << "Saved graph to pitwall_f1.db\n";
+    bool can_persist = true;
+    try {
+        std::filesystem::remove("pitwall_f1.db");
+    }
+    catch (const std::filesystem::filesystem_error& e) {
+        std::cout << "[WARN] Could not remove pitwall_f1.db (" << e.what() << "); skipping persistence step.\n";
+        can_persist = false;
+    }
+
+    if (can_persist) {
+        Storage storage("pitwall_f1.db");
+        GraphRepository repo(storage);
+        repo.create_tables();
+        repo.save_graph(g);
+        std::cout << "Saved graph to pitwall_f1.db\n";
+    }
 }
 
 void test_markov_trainer() {
@@ -534,15 +542,20 @@ void test_driver_index() {
     fs::path results_path = temp_dir / "results.json";
 
     {
+        std::ostringstream rows;
+        // Alpha: exactly 10 valid (grid != 0) rows, each (grid - finish) = 3 -> mean = 3.0.
+        // Meets the >= 10 valid-row threshold, so it must appear in the result.
+        for (int i = 0; i < 10; ++i) {
+            rows << R"({"driver_name": "Alpha", "circuit_name": "Circuit One", "position": 2, "grid": 5, "team_name": "Team One"},)";
+        }
+        // Beta: 2 valid rows -> below the threshold -> must be omitted entirely.
+        rows << R"({"driver_name": "Beta", "circuit_name": "Circuit One", "position": 6, "grid": 3, "team_name": "Team Two"},)";
+        rows << R"({"driver_name": "Beta", "circuit_name": "Circuit Two", "position": 2, "grid": 1, "team_name": "Team Two"},)";
+        // Gamma: only a grid==0 row -> zero valid rows -> must be omitted entirely.
+        rows << R"({"driver_name": "Gamma", "circuit_name": "Circuit One", "position": 9, "grid": 0, "team_name": "Team Three"})";
+
         std::ofstream f(results_path);
-        f << R"([
-            {"driver_name": "Alpha", "circuit_name": "Circuit One", "position": 2, "grid": 5, "team_name": "Team One"},
-            {"driver_name": "Alpha", "circuit_name": "Circuit Two", "position": 4, "grid": 8, "team_name": "Team One"},
-            {"driver_name": "Alpha", "circuit_name": "Circuit Three", "position": 10, "grid": 0, "team_name": "Team One"},
-            {"driver_name": "Beta", "circuit_name": "Circuit One", "position": 6, "grid": 3, "team_name": "Team Two"},
-            {"driver_name": "Beta", "circuit_name": "Circuit Two", "position": 2, "grid": 1, "team_name": "Team Two"},
-            {"driver_name": "Gamma", "circuit_name": "Circuit One", "position": 9, "grid": 0, "team_name": "Team Three"}
-        ])";
+        f << "[" << rows.str() << "]";
     }
 
     MarkovTrainer trainer;
@@ -553,17 +566,18 @@ void test_driver_index() {
     const double epsilon = 1e-9;
     bool ok = true;
 
-    // Alpha: (5-2)=3, (8-4)=4, grid==0 row filtered -> mean = 3.5
+    // Alpha: 10 valid rows, each contributing 3 -> mean = 3.0, meets the threshold.
     ok &= (indices.count("Alpha") == 1);
-    ok &= (std::fabs(indices.at("Alpha") - 3.5) < epsilon);
+    ok &= (std::fabs(indices.at("Alpha") - 3.0) < epsilon);
 
-    // Beta: (3-6)=-3, (1-2)=-1 -> mean = -2.0
-    ok &= (indices.count("Beta") == 1);
-    ok &= (std::fabs(indices.at("Beta") - (-2.0)) < epsilon);
+    // Beta: only 2 valid rows -> below the 10-row minimum -> omitted from the map.
+    ok &= (indices.count("Beta") == 0);
 
-    // Gamma: only a grid==0 row -> zero valid rows -> index 0.0, but still present
-    ok &= (indices.count("Gamma") == 1);
-    ok &= (std::fabs(indices.at("Gamma") - 0.0) < epsilon);
+    // Gamma: zero valid rows -> below the 10-row minimum -> omitted from the map.
+    ok &= (indices.count("Gamma") == 0);
+
+    // Only drivers meeting the threshold are present at all.
+    ok &= (indices.size() == 1);
 
     if (ok) {
         std::cout << "[PASS] compute_driver_indices computed correct means and filtered grid==0 rows.\n";

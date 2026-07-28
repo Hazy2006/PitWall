@@ -44,9 +44,6 @@ void GraphRepository::create_tables() {
         "source_id INTEGER NOT NULL REFERENCES nodes(id),"
         "target_id INTEGER NOT NULL REFERENCES nodes(id),"
         "win_rate REAL NOT NULL DEFAULT 0.0,"
-        "affinity_score REAL NOT NULL DEFAULT 0.0,"
-        "performance_delta REAL NOT NULL DEFAULT 0.0,"
-        "tire_preference REAL NOT NULL DEFAULT 0.0,"
         "PRIMARY KEY (source_id, target_id)"
         ");"
     );
@@ -83,10 +80,9 @@ void GraphRepository::save_graph(const Graph& g) {
         Edge e = g.get_edge(key.first, key.second);
         std::ostringstream sql;
         sql << std::setprecision(17);
-        sql << "INSERT INTO edges (source_id, target_id, win_rate, affinity_score, performance_delta, tire_preference) VALUES ("
+        sql << "INSERT INTO edges (source_id, target_id, win_rate) VALUES ("
             << key.first << ", " << key.second << ", "
-            << e.winRate << ", " << e.affinityScore << ", "
-            << e.performanceDelta << ", " << e.tirePreference << ");";
+            << e.winRate << ");";
         storage.execute(sql.str());
     }
 }
@@ -106,17 +102,12 @@ Graph GraphRepository::load_graph() {
     }
 
     auto edge_rows = storage.query(
-        "SELECT source_id, target_id, win_rate, affinity_score, performance_delta, tire_preference FROM edges;"
+        "SELECT source_id, target_id, win_rate FROM edges;"
     );
     for (const auto& row : edge_rows) {
         int source_id = std::stoi(row.at("source_id"));
         int target_id = std::stoi(row.at("target_id"));
-        Edge e{
-            std::stod(row.at("win_rate")),
-            std::stod(row.at("affinity_score")),
-            std::stod(row.at("performance_delta")),
-            std::stod(row.at("tire_preference"))
-        };
+        Edge e{ std::stod(row.at("win_rate")) };
         g.add_edge(source_id, target_id, e);
     }
 

@@ -211,7 +211,7 @@ std::vector<int> Graph::dijkstra(int start, int end) const {
         auto it = successors.find(cur);
         if (it != successors.end()) {
             for (int nb : it->second) {
-                double weight = edges.at({ cur, nb }).affinityScore;
+                double weight = edges.at({ cur, nb }).winRate;
                 double new_dist = d + weight;
                 if (dist.count(nb) == 0 || new_dist < dist[nb]) {
                     dist[nb] = new_dist;
