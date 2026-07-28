@@ -1,123 +1,198 @@
 # PitWall
 
-A graph database engine and F1 strategic intelligence system built from scratch in C++.
+---
+
+A graph engine and Formula 1 race outcome predictor built from scratch in C++.
 
 ## What
 
-PitWall models Formula 1 as a graph — drivers, teams, and circuits as nodes; historical relationships, win rates, and performance data as edges. On top of this, a Markov chain engine estimates race outcomes and computes optimal strategies in natural language.
+---
 
-The end goal: a system that tells you *why* Ferrari should pit at lap 34, not just that they should.
+PitWall trains a Markov model on historical Formula 1 race results to answer one question:
+
+> Given a driver's starting grid position, where are they most likely to finish?
+
+The project imports the 2024 Formula 1 season from the Jolpica F1 API, builds a historical grid → finish probability model, adjusts predictions using each driver's average positions gained or lost, and generates deterministic natural-language reports.
+
+The current version predicts finishing position only. It does **not** model pit strategy, tire degradation, or lap-by-lap race evolution.
+
+---
+
+## Example Output
+
+---
+
+### Charles Leclerc — Starting P3
+
+```
+A car starting P3 most often finishes P2 (21%), with
+P3 (21%) and P5 (17%) the next most likely outcomes.
+
+Leclerc tends to gain 0.9 positions from his grid slot,
+shifting the prediction toward P1.
+```
+
+### Oliver Bearman — Starting P10
+
+```
+A car starting P10 most often finishes P9 (13%), with
+P10 (13%) and P12 (13%) the next most likely outcomes.
+
+No driver-specific adjustment is available because
+Bearman has fewer than 10 races in the dataset.
+```
+
+---
 
 ## Tech Stack
 
-- **Language**: C++ (primary), Python
-- **Persistence**: SQLite via raw C API (`sqlite3.h`)
-- **Config/lightweight data**: JSON
-- **IDE**: Visual Studio
-- **Testing**: TDD from day one — tests written before implementation, driving the design forward
+---
 
-## Core Architecture
+- **Language:** C++ (MSVC), Python
+- **Persistence:** SQLite (raw C API)
+- **JSON:** nlohmann/json
+- **Dependency Manager:** vcpkg
+- **Development:** Visual Studio
+- **Testing:** Test-Driven Development (TDD)
 
-### Layering
+---
 
-PitWall follows a strict layered architecture:
+## Architecture
 
-- **Domain** — `Node` hierarchy (polymorphic: `DriverNode`, `TeamNode`, `CircuitNode`), `Edge` struct, `Graph` class (hash maps + adjacency lists with both successors and predecessors maps)
-- **Repository** — domain-aware data access layer, translates between domain objects and raw storage
-- **Storage** — raw SQLite execution, no domain awareness — Repository is the only caller
-- **Service** — orchestrates Repository and the Markov engine; never touches Storage directly
+---
 
-Call chain: `Service → Repository → Storage → SQLite`
-
-### Graph Engine
-
-- Dual adjacency maps (successors + predecessors) for O(1) in/out-degree lookups
-- `Node` subclasses hold only Markov-relevant mathematical coefficients — display data (nationality, logos, photos) lives in SQLite and gets joined at render time by the UI layer
-- `Edge` struct with named weight fields: `winRate`, `affinityScore`, `performanceDelta`, `tirePreference`
-- Nodes are **immutable** once constructed — populated via constructor when the Repository builds the graph
-- Runtime-changing variables (current tire age, track temperature, fuel load) live in a separate `SimulationState` object passed through the Markov engine, never mutating the base graph
-
-### Circuit Database
-
-- Per-circuit data with layout characteristics and historical race results stored in SQLite
-- Circuit photos stored as files on disk; paths referenced in the database
-
-### Markov Chain Layer
-
-- **Trainer** — normalizes historical race data into transition probabilities
-- **Engine** — runs queries against the trained model at runtime
-- Pipeline: `Raw data source → Trainer (normalize counts) → Storage (JSON/DB) → Load → Engine → Client request → Output`
-- Transition probability estimation from historical data; models driver performance, tire degradation windows, championship scenarios
-
-### Strategy Report Generator
-
-- LLM layer translates numerical output into actionable team recommendations
-- **Observer pattern**: race state changes trigger automatic recomputation of strategy recommendations
-
-## Example Outputs
+PitWall follows a strict layered architecture.
 
 ```
-> Ferrari should pit Leclerc at lap 34 — medium degradation on this circuit
-  historically drops off after lap 33, and Hamilton is 4s behind on fresher tires.
-
-> McLaren must win Barcelona or lose ~15% championship probability.
-  Current trajectory puts Norris P3 with no buffer against Verstappen.
-
-> Red Bull should run hard compounds at Abu Dhabi — Tsunoda's lap consistency
-  on this circuit improves significantly on harder compounds after lap 20.
-
-> Mercedes defensive strategy recommended — attack probability of success
-  given current gap and tire delta is 23%. Hold position.
+Markov Engine
+      │
+Repository
+      │
+Storage
+      │
+SQLite
 ```
 
-## Graph Model
+### Domain
 
-| Node type | Examples | Markov-relevant fields |
-|---|---|---|
-| Driver | Leclerc, Verstappen, Norris | `tire_management_modifier`, `base_pace_delta` |
-| Team | Ferrari, Red Bull, McLaren | `strategy_aggressiveness` |
-| Circuit | Monaco, Interlagos, Abu Dhabi | `base_degradation_rate`, `pit_lane_time_loss` |
+- Polymorphic `Node` hierarchy
+  - `DriverNode`
+  - `TeamNode`
+  - `CircuitNode`
+- `Edge`
+- `Graph`
+    - Dual adjacency maps
+    - O(1) in/out degree lookups
 
-Edges encode: historical win rates, driver-circuit affinity scores, team performance deltas, tire compound preferences.
+### Repository
 
-> Example: Leclerc → Monaco has a higher win-transition probability than Leclerc → Interlagos,
-> reflecting both familiarity and historical performance.
+Translates between domain objects and SQLite rows.
 
-## Markov Chain Model
+### Storage
 
-State = `(driver, circuit, lap, tire compound, position)`
+Executes raw SQLite statements with no knowledge of domain objects.
 
-Transition probabilities estimated from historical F1 data (Jolpica-F1 API, OpenF1). The model answers:
-- At which lap does switching compounds maximize P(win)?
-- Given current state, what is each driver's championship probability?
-- How does a safety car at lap X shift the outcome distribution?
+The Markov engine is intentionally independent of both the graph and persistence layers.
 
-**Scope**: simplified state space — cognitive and FIA regulation variables are out of scope for V1.
+---
 
-## Data Sources
+## Markov Model
 
-- Jolpica-F1 API, OpenF1 — full historical race data, free
-- Circuit photos and layout files on disk, paths stored in SQLite
+---
+
+Training consists of four stages.
+
+1. Count every historical transition from grid position to finishing position.
+2. Convert counts into probability distributions at query time.
+3. Compute each driver's average positions gained (`grid - finish`) for drivers with at least ten races.
+4. Shift the pooled probability distribution using that driver index.
+
+The reporter converts these probabilities into deterministic natural-language output.
+
+---
+
+## Building
+
+---
+
+Requirements:
+
+- Visual Studio
+- MSVC
+- vcpkg
+- nlohmann/json
+
+Build:
+
+```text
+PitWall.slnx
+```
+
+Target:
+
+```text
+PitWallEngine (Debug / x64)
+```
+
+To refresh the dataset:
+
+```bash
+python scripts/fetch_f1_data.py
+```
+
+This downloads:
+
+```
+data/
+├── drivers.json
+├── teams.json
+├── circuits.json
+└── results.json
+```
+
+---
+
+## Limitations
+
+---
+
+- The model uses only the 2024 Formula 1 season.
+- Driver adjustments require at least 10 races.
+- Driver performance is represented by a single average position gain/loss.
+- Large positive adjustments naturally saturate at P1.
+- No lap-level simulation.
+- No tire degradation model.
+- No pit strategy optimization.
+- No safety car simulation.
+
+---
 
 ## Roadmap
 
-- [x] Core graph engine — polymorphic node hierarchy, edge struct, add/remove nodes and edges
-- [x] TDD test suite — domain layer tests passing
-- [x] Graph traversal — BFS, DFS, Dijkstra query support
-- [x] SQLite integration — circuit database, persistence layer
-- [x] Jolpica/OpenF1 data import pipeline
-- [ ] Markov chain transition probability estimation
-- [ ] Championship scenario simulator
-- [ ] Pit stop window optimizer
-- [ ] Observer pattern — strategy recomputation on state change
-- [ ] LLM strategy report generator
-- [ ] Markov chain extension for Semester 1 probability course
+---
 
-## Timeline
+- [x] Graph engine
+- [x] SQLite persistence
+- [x] Jolpica data import pipeline
+- [x] Grid → finish Markov model
+- [x] Driver performance adjustment
+- [x] Natural-language prediction reports
+- [ ] Championship Monte Carlo simulator
+- [ ] Driver vs. Driver comparison reports
+- [ ] Lap-level race simulation
 
-July 9th, 2026 onwards
+---
 
 ## Future
 
-PitWall's graph + probabilistic query pattern extends naturally to other domains —
-including artifact relationship modeling for interdisciplinary research platforms.
+---
+
+The natural next step is extending the state space beyond **grid → finish**.
+
+Importing lap and pit-stop data would allow the engine to model:
+
+- Tire degradation
+- Pit-window optimization
+- Safety car strategy
+- Dynamic race evolution
+- Strategy recommendation instead of finish prediction
