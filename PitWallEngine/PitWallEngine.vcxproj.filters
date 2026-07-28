@@ -39,6 +39,9 @@
     <ClInclude Include="..\markov_engine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\strategy_reporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp">
@@ -63,6 +66,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\markov_engine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\strategy_reporter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

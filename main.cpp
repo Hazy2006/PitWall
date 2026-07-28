@@ -16,6 +16,8 @@ void test_markov_real();
 void test_driver_index();
 void test_driver_aware_prediction();
 void test_driver_index_real();
+void test_strategy_reporter();
+void test_strategy_reporter_real();
 
 int main() {
 	std::cout << "=== Running PitWall Test Suite ===\n";
@@ -52,5 +54,9 @@ int main() {
 	test_driver_index();
 	std::cout << "==================================\n";
 	test_driver_aware_prediction();
+	std::cout << "==================================\n";
+	test_strategy_reporter();
+	std::cout << "==================================\n";
+	test_strategy_reporter_real();
 	return 0;
 }
