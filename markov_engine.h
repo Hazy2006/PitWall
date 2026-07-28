@@ -13,8 +13,11 @@ public:
 
     // Shifts the pooled distribution toward better finishes by driver_index positions
     // (a single scalar "handicap displacement", not a per-driver transition matrix).
-    // The shift is linear/symmetric across every finish bucket, clamped to [1, max
-    // finish present for this grid]; mass pushed past a bound accumulates there.
+    // driver_index is used at full fractional precision (not rounded): each bucket's
+    // mass lands on a fractional target position and is split between the two
+    // integer positions straddling it, proportional to distance. Targets outside
+    // [1, max finish present for this grid] are clamped to that bound before mass
+    // is accumulated, so total probability mass is conserved.
     // Known V1 limitation: a driver starting P1 in a dominant car can never show a
     // "gain" no matter how large their index, since there is no room above P1.
     // Returns an empty map if grid_position has no pooled data.

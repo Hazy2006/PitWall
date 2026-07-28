@@ -64,7 +64,7 @@ Both classes are deliberately **graph-free** — they never see a `Graph`, `Node
 - `MarkovTrainer::compute_driver_indices(path)`: for each driver, averages `(grid - finish)` over all `grid != 0` rows. **Drivers with fewer than 10 valid rows are omitted from the returned map entirely** — not present, not `0.0`.
 - `MarkovEngine::predict_finish_distribution(grid)`: normalizes one pooled row into a probability distribution; empty map if the grid position was never observed.
 - `MarkovEngine::most_likely_finish(grid)`: argmax of the above, `-1` if unseen.
-- `MarkovEngine::predict_finish_distribution_for_driver(grid, driver_index)`: shifts the pooled distribution by `round(driver_index)` positions, clamped to `[1, max finish observed for that grid]`, with out-of-range mass folding into the nearest bound.
+- `MarkovEngine::predict_finish_distribution_for_driver(grid, driver_index)`: shifts the pooled distribution by the full fractional `driver_index` (not rounded). Each bucket's mass lands on a fractional target position and is split between the two straddling integer positions, proportional to distance; targets are clamped to `[1, max finish observed for that grid]` before mass is accumulated, so total probability is conserved.
 
 ## Persistence layer: final schema
 
@@ -103,5 +103,5 @@ No `.db` files ship in the repo (`*.db` is gitignored); a fresh `pitwall_f1.db` 
 
 - **`win_rate` is effectively boolean.** `DataImporter::import_results` aggregates wins/total per `(driver, circuit)` pair, but the current single-season data has at most one race per driver-circuit combination, so `win_rate` in practice only ever takes the values `0.0` or `1.0` — the "rate" framing doesn't have multi-race data to average over yet.
 - **Driver index is unweighted above the 10-race threshold.** `compute_driver_indices` treats a driver with exactly 10 valid rows the same as one with 200 — there's no confidence weighting or recency weighting once the minimum is cleared.
-- **The handicap shift is a single scalar.** `predict_finish_distribution_for_driver` shifts the whole pooled distribution by one `round(driver_index)` amount; it can't express that a driver over- or under-performs differently depending on grid position, circuit, or car. A driver starting P1 in a dominant car can never show a "gain," since there's no room above P1.
+- **The handicap shift is a single scalar.** `predict_finish_distribution_for_driver` shifts the whole pooled distribution by one `driver_index`-sized amount (fractional, split proportionally between straddling positions); it can't express that a driver over- or under-performs differently depending on grid position, circuit, or car. A driver starting P1 in a dominant car can never show a "gain," since there's no room above P1.
 - **`MarkovEngine` holds a `const&` to the trainer's counts.** `MarkovEngine(const map<int,map<int,int>>& transition_counts)` stores a reference, not a copy. This is only safe as long as the `MarkovTrainer` (or whatever counts map was passed in) outlives the `MarkovEngine` instance — nothing enforces that lifetime relationship at compile time.
