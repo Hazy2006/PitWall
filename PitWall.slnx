@@ -4,4 +4,5 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="PitWallEngine/PitWallEngine.vcxproj" Id="23155bae-4687-4836-8166-8bc7e2b8112b" />
+  <Project Path="PitWallEngine/PitWallTests.vcxproj" Id="af14fe8c-ab2f-4705-9787-17ea6d161655" />
 </Solution>
