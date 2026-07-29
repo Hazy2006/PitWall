@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{23155bae-4687-4836-8166-8bc7e2b8112b}</ProjectGuid>
-    <RootNamespace>PitWallEngine</RootNamespace>
+    <ProjectGuid>{af14fe8c-ab2f-4705-9787-17ea6d161655}</ProjectGuid>
+    <RootNamespace>PitWallTests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -73,6 +73,13 @@
   <PropertyGroup>
     <VcpkgEnabled>true</VcpkgEnabled>
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
+  <!-- Distinct IntDir: this project lives alongside PitWallEngine.vcxproj in the
+       same directory, and the default IntDir is derived from the project
+       directory, not the project name. Without this override both projects
+       would race to write identically-named .obj files into the same folder. -->
+  <PropertyGroup>
+    <IntDir>$(Platform)\$(Configuration)\$(MSBuildProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -157,7 +164,8 @@
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
     <ClCompile Include="..\graph_repository.cpp" />
-    <ClCompile Include="..\main.cpp" />
+    <ClCompile Include="..\test_main.cpp" />
+    <ClCompile Include="..\test_runner.cpp" />
     <ClCompile Include="..\storage.cpp" />
     <ClCompile Include="..\data_importer.cpp" />
     <ClCompile Include="..\markov_trainer.cpp" />
