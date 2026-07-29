@@ -18,3 +18,18 @@ data/
 
 # Generated inspection database
 *.db
+
+# Build artifacts (any location)
+**/x64/
+*.obj
+*.pdb
+*.ilk
+*.tlog
+*.log
+*.recipe
+*.idb
+
+# Agent scratch + personal working docs (keep local, not on GitHub)
+docs/superpowers/
+.claude/
+pitwall_architecture_log.md
