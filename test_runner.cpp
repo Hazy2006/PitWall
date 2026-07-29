@@ -6,7 +6,6 @@
 #include "markov_engine.h"
 #include "strategy_reporter.h"
 #include "service.h"
-#include <cassert>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -17,6 +16,7 @@
 #include <sstream>
 
 void run_domain_tests() {
+    std::cout << "--- Running Polymorphic Domain Graph Test ---\n";
     Graph g;
 
     auto leclerc = std::make_shared<DriverNode>("Leclerc", 0.87, -0.2);
@@ -25,18 +25,25 @@ void run_domain_tests() {
     int id1 = g.add_node(leclerc);
     int id2 = g.add_node(ferrari);
 
-    assert(id1 == 0);
-    assert(id2 == 1);
-    assert(g.count_vertices() == 2);
+    bool ok = true;
+    ok &= (id1 == 0);
+    ok &= (id2 == 1);
+    ok &= (g.count_vertices() == 2);
 
-    assert(g.get_node(id1)->get_name() == "Leclerc");
-    assert(g.get_node(id1)->get_type_string() == "Driver");
-    assert(g.get_node(id2)->get_type_string() == "Team");
+    ok &= (g.get_node(id1)->get_name() == "Leclerc");
+    ok &= (g.get_node(id1)->get_type_string() == "Driver");
+    ok &= (g.get_node(id2)->get_type_string() == "Team");
 
-    std::cout << "Polymorphic Domain Graph Tests Passed!\n";
+    if (ok) {
+        std::cout << "[PASS] Polymorphic Domain Graph Tests Passed!\n";
+    }
+    else {
+        std::cout << "[FAIL] Polymorphic Domain Graph Tests failed.\n";
+    }
 }
 
 void run_edge_tests() {
+    std::cout << "--- Running Edge Routing Test ---\n";
     Graph g;
 
     auto leclerc = std::make_shared<DriverNode>("Leclerc", 0.87, -0.2);
@@ -51,14 +58,20 @@ void run_edge_tests() {
 
     g.add_edge(driver_id, circuit_id, stats);
 
-    assert(g.count_edges() == 1);
-    assert(g.is_edge(driver_id, circuit_id) == true);
-    assert(g.is_edge(circuit_id, driver_id) == false);
+    bool ok = true;
+    ok &= (g.count_edges() == 1);
+    ok &= (g.is_edge(driver_id, circuit_id) == true);
+    ok &= (g.is_edge(circuit_id, driver_id) == false);
 
     Edge retrieved = g.get_edge(driver_id, circuit_id);
-    assert(retrieved.winRate == 0.15);
+    ok &= (retrieved.winRate == 0.15);
 
-    std::cout << "Edge Routing Tests Passed!\n";
+    if (ok) {
+        std::cout << "[PASS] Edge Routing Tests Passed!\n";
+    }
+    else {
+        std::cout << "[FAIL] Edge Routing Tests failed.\n";
+    }
 }
 
 void test_bfs() {
