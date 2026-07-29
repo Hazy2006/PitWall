@@ -11,9 +11,7 @@
 // grid -> finish transition model) and the results JSON, which is used to
 // derive three things -- the season's race order, each driver's actual
 // points through a given race, and each driver's rounded average grid
-// position. Deliberately does NOT apply per-driver index shifts
-// (MarkovEngine::predict_finish_distribution_for_driver) -- that is a later
-// phase; this baseline always samples from the pooled distribution.
+// position. 
 class ChampionshipSimulator {
 public:
     // seed defaults to a random_device draw, so unseeded production use
@@ -33,20 +31,16 @@ public:
     // in the result, even with 0.0 points.
     std::map<std::string, double> points_through_race(int through_race) const;
 
-    // Simulates the rest of the season num_simulations times. Races
-    // [1, from_race] are fixed at their actual results; races
-    // [from_race + 1, race_count()] are simulated: each driver's finish is
-    // sampled from engine.predict_finish_distribution(their rounded average
-    // grid), all sampled finishes for the race are shuffled and then sorted
-    // ascending (so ties are broken randomly, not by insertion order) to
-    // produce a valid 1..K permutation, and points are awarded by that
-    // assigned position. A driver with no valid average grid, or whose
-    // rounded average grid has no pooled data in the engine, is skipped for
-    // every remaining race (never assigned a position, scores 0).
-    // Returns, per driver, the fraction of simulations in which they ended
-    // the season with the most total points. An exact tie for the season
-    // lead splits that simulation's win credit evenly among the tied
-    // drivers, so the returned fractions always sum to 1.0.
+    // Simulates the remainder of the season num_simulations times.
+    // Races [1, from_race] are fixed at actual results; [from_race+1, end] are simulated.
+    // @param from_race  races up to and including this use real results; 0 = simulate all
+    // @param num_simulations  number of Monte Carlo runs
+    // @return per-driver fraction of simulations won (sums to 1.0)
+    // @note Each race: sample finish from pooled avg-grid distribution, then
+    //  sample-then-rank into a valid permutation (ties broken randomly).
+    //  Drivers with no avg grid or no pooled data score 0 for that race.
+
+
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 
 private:
