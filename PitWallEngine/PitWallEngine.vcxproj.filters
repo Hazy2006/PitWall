@@ -42,6 +42,9 @@
     <ClInclude Include="..\strategy_reporter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\service.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp">
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\strategy_reporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
