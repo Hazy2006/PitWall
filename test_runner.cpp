@@ -6,6 +6,7 @@
 #include "markov_engine.h"
 #include "strategy_reporter.h"
 #include "service.h"
+#include "championship_simulator.h"
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -853,4 +854,145 @@ void test_strategy_reporter_real() {
                << reporter.report_single(10, "Oliver Bearman") << "\n";
 
     std::cout << "\nVerstappen, starting P1:\n  " << reporter.report_single(1, "Max Verstappen") << "\n";
+}
+
+void test_championship_simulator() {
+    std::cout << "--- Running Championship Simulator Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_championship_simulator_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // One race, two drivers. Driver A starts P1, Driver B starts P2 -- and
+    // their average grids feed a rigged engine below where grid 1 ALWAYS
+    // finishes P1 and grid 2 ALWAYS finishes P2, so Driver A must win every
+    // simulation of this single remaining race.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team One"}
+        ])";
+    }
+
+    std::map<int, std::map<int, int>> counts;
+    counts[1][1] = 100;  // grid 1 -> always finishes P1
+    counts[2][2] = 100;  // grid 2 -> always finishes P2
+    MarkovEngine engine(counts);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    const unsigned int seed = 12345;
+    ChampionshipSimulator sim1(engine, results_path.string(), seed);
+    std::map<std::string, double> probs = sim1.simulate_championship(0, 1000);
+
+    ok &= (probs.size() == 2);
+    ok &= (probs.count("Driver A") == 1) && (std::fabs(probs.at("Driver A") - 1.0) < epsilon);
+    ok &= (probs.count("Driver B") == 1) && (std::fabs(probs.at("Driver B") - 0.0) < epsilon);
+
+    double sum = 0.0;
+    for (const auto& [driver, prob] : probs) {
+        sum += prob;
+    }
+    ok &= (std::fabs(sum - 1.0) < epsilon);
+
+    // Determinism: a fresh simulator built from the same data and the same
+    // seed must reproduce the exact same result.
+    ChampionshipSimulator sim2(engine, results_path.string(), seed);
+    std::map<std::string, double> probs_repeat = sim2.simulate_championship(0, 1000);
+    ok &= (probs_repeat == probs);
+
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] ChampionshipSimulator guaranteed the rigged winner, probabilities summed to 1.0, "
+                     "and results were reproducible under a fixed seed.\n";
+    }
+    else {
+        std::cout << "[FAIL] ChampionshipSimulator output did not match expectations.\n";
+    }
+}
+
+void test_championship_points_through_race() {
+    std::cout << "--- Running Championship Points-Through-Race Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_championship_points_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Race 1 (Circuit One): Driver A P1 (25 pts), Driver B P2 (18 pts).
+    // Race 2 (Circuit Two): Driver A P3 (15 pts), Driver B P1 (25 pts).
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Two", "position": 3, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Two", "position": 1, "grid": 2, "team_name": "Team One"}
+        ])";
+    }
+
+    std::map<int, std::map<int, int>> counts;  // unused by this test, engine still required to construct
+    MarkovEngine engine(counts);
+    ChampionshipSimulator sim(engine, results_path.string());
+
+    bool ok = true;
+    ok &= (sim.race_count() == 2);
+
+    std::map<std::string, double> p0 = sim.points_through_race(0);
+    ok &= (p0.at("Driver A") == 0.0);
+    ok &= (p0.at("Driver B") == 0.0);
+
+    std::map<std::string, double> p1 = sim.points_through_race(1);
+    ok &= (p1.at("Driver A") == 25.0);
+    ok &= (p1.at("Driver B") == 18.0);
+
+    std::map<std::string, double> p2 = sim.points_through_race(2);
+    ok &= (p2.at("Driver A") == 40.0);
+    ok &= (p2.at("Driver B") == 43.0);
+
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] points_through_race matched the hand-calculated standings at each split point.\n";
+    }
+    else {
+        std::cout << "[FAIL] points_through_race did not match the hand-calculated standings.\n";
+    }
+}
+
+void test_championship_real() {
+    std::cout << "--- Running Real Data Championship Simulator Smoke Test ---\n";
+
+    MarkovTrainer trainer;
+    trainer.train("data/results.json");
+    MarkovEngine engine(trainer.get_counts());
+    ChampionshipSimulator sim(engine, "data/results.json", /*seed=*/42);
+
+    auto print_top8 = [](const std::string& label, const std::map<std::string, double>& probs) {
+        std::vector<std::pair<std::string, double>> sorted(probs.begin(), probs.end());
+        std::sort(sorted.begin(), sorted.end(),
+            [](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b) {
+                return a.second > b.second;
+            });
+        std::cout << label << ":\n";
+        for (size_t i = 0; i < sorted.size() && i < 8; ++i) {
+            std::cout << "  " << (i + 1) << ". " << sorted[i].first
+                       << " : " << (sorted[i].second * 100.0) << "%\n";
+        }
+    };
+
+    int total_races = sim.race_count();
+    std::cout << "Season has " << total_races << " races.\n\n";
+
+    std::map<std::string, double> full_season = sim.simulate_championship(0, 10000);
+    print_top8("Title probability, simulated from race 0 (entire season)", full_season);
+
+    int mid_race = total_races / 2;
+    std::cout << "\n";
+    std::map<std::string, double> mid_season = sim.simulate_championship(mid_race, 10000);
+    print_top8("Title probability, simulated from race " + std::to_string(mid_race) + " (mid-season split)", mid_season);
 }

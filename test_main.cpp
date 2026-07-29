@@ -18,6 +18,9 @@ void test_driver_aware_prediction();
 void test_driver_index_real();
 void test_strategy_reporter();
 void test_strategy_reporter_real();
+void test_championship_simulator();
+void test_championship_points_through_race();
+void test_championship_real();
 
 int main() {
 	std::cout << "=== Running PitWall Test Suite ===\n";
@@ -58,5 +61,11 @@ int main() {
 	test_strategy_reporter();
 	std::cout << "==================================\n";
 	test_strategy_reporter_real();
+	std::cout << "==================================\n";
+	test_championship_simulator();
+	std::cout << "==================================\n";
+	test_championship_points_through_race();
+	std::cout << "==================================\n";
+	test_championship_real();
 	return 0;
 }

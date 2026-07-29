@@ -153,6 +153,7 @@
     <ClInclude Include="..\markov_engine.h" />
     <ClInclude Include="..\strategy_reporter.h" />
     <ClInclude Include="..\service.h" />
+    <ClInclude Include="..\championship_simulator.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
@@ -164,6 +165,7 @@
     <ClCompile Include="..\markov_engine.cpp" />
     <ClCompile Include="..\strategy_reporter.cpp" />
     <ClCompile Include="..\service.cpp" />
+    <ClCompile Include="..\championship_simulator.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
