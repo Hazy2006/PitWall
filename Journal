@@ -73,3 +73,63 @@ First time PitWall processed actual race data instead of test fixtures.
 
 Next up: Phase 5 — Markov transition model. Scoping down from the full (driver, circuit, lap, tire, position) state space to a (driver, circuit, grid_position) → 
 finish_position model, since one season isn't enough data to populate the full space meaningfully.
+
+
+
+Dev Log — July 27-29, 2026
+PitWall — Markov model (Phase 5) + a real audit
+
+Built the actual Markov layer. Scoped it down hard, on purpose: the
+README dreamed of a (driver, circuit, lap, tire, position) state space,
+but one season of data can't fill that — most cells would have one
+observation or zero. Went with pooled grid → finish instead. Every grid
+slot has ~20 real data points, so the distributions actually mean
+something.
+
+5a: Trainer counts grid→finish transitions (raw integer counts, normalize
+at query time — makes updates trivial). Engine turns a grid position into
+a probability distribution. Smell-tested it: pole (P1) predicts a P1 finish
+46% of the time. That's real — 2024 was front-runner-dominant. Model
+matched reality without me hardcoding anything, which is when I started
+trusting it.
+
+5b: driver performance index. Considered per-driver matrices, killed the
+idea — same one-season starvation problem, each driver raced each circuit
+once. Went with a "handicap" instead: one scalar per driver = average
+positions gained/lost (grid - finish). Shifts the pooled distribution.
+This finally put real numbers in param2, which had been 0.0 forever.
+
+Then a full audit, and this is where it got good:
+- Found the driver index was ranking substitute drivers (Colapinto, Bearman
+  — ~5-9 races) above full-season guys like Hamilton. One good drive over
+  few races spikes the average. Added a 10-race minimum. Kept it honest
+  in the README instead of hiding it.
+- Dropped 3 dead edge fields (affinity_score, performance_delta,
+  tire_preference) — all 0.0, no feature was ever going to fill them.
+  Speculative schema from day 1. Lean schema reads as finished, not
+  aspirational.
+- The shift was rounding the index to an integer — +1.875 and +1.2
+  collapsing to the same shift, throwing away precision I'd computed.
+  Switched to fractional shift with mass interpolation between straddling
+  positions. Had to watch the "sums to 1.0" invariant like a hawk.
+
+Best moment: a strong driver (Zhou, +2.08) from P5 was showing 31% at P1,
+which felt too high. Instead of assuming a bug, derived it by hand — turns
+out it's correct. When you shift a P5 distribution forward by 2+, three
+buckets land at or below P1, and there's no finish better than first, so
+they pile up at the boundary. Not a bug — the model saturating at P1,
+which is what "overperformance" should do when you're already near the
+front. Documented it as a known limitation. Would've "fixed" correct code
+into broken code if I'd trusted the surprising number instead of checking.
+
+Phase 6: StrategyReporter. Deterministic string composition, NO LLM — on
+purpose. An LLM can claim things the numbers don't support; a template
+can't. It states only what the data backs (positional probability), and
+honestly says "no adjustment available" for filtered-out drivers instead
+of faking one.
+
+Also rewrote the README, which had drifted into fiction — it promised pit
+strategy, tire degradation, and an LLM, none of which exist. Now it says
+what PitWall actually is: a grid→finish predictor with documented limits.
+Realized the "service layer" I planned on Day 1 was never actually built —
+orche
