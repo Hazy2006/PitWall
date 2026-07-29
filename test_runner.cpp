@@ -5,6 +5,7 @@
 #include "markov_trainer.h"
 #include "markov_engine.h"
 #include "strategy_reporter.h"
+#include "service.h"
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -14,24 +15,6 @@
 #include <cmath>
 #include <algorithm>
 #include <sstream>
-
-namespace {
-    // Thin integration helper: writes computed driver performance indices into
-    // each DriverNode's base_pace_delta (param2). Keeps MarkovTrainer/MarkovEngine
-    // free of any Graph dependency, per the layering rule.
-    void apply_driver_indices(Graph& g, const DataImporter& importer, const std::map<std::string, double>& indices) {
-        for (const auto& [name, index] : indices) {
-            int id = importer.get_node_id(name);
-            if (id < 0) {
-                continue;
-            }
-            auto driver_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(id));
-            if (driver_node) {
-                driver_node->base_pace_delta = index;
-            }
-        }
-    }
-}
 
 void run_domain_tests() {
     Graph g;
@@ -721,12 +704,14 @@ void test_driver_index_real() {
         std::cout << "  " << sorted_indices[idx].first << " : " << sorted_indices[idx].second << "\n";
     }
 
-    // Part C: write the indices into the graph (param2 on DriverNode) via the
-    // thin integration helper, keeping MarkovTrainer/MarkovEngine Graph-free.
-    Graph g;
-    DataImporter importer(g);
-    importer.import_drivers("data/drivers.json");
-    apply_driver_indices(g, importer, indices);
+    // Part C: run the same real data through the full PitWallService pipeline
+    // (import, train, write indices into the graph, build the reporter) and
+    // confirm the strong/weak drivers' reports reflect their computed indices.
+    // This is the same integration point the old apply_driver_indices helper
+    // covered directly; it now lives in the service instead of being
+    // duplicated here.
+    PitWallService service;
+    service.load("data");
 
     MarkovEngine engine(trainer.get_counts());
 
@@ -743,40 +728,19 @@ void test_driver_index_real() {
         }
     };
 
-    auto print_distribution_sum = [](const std::string& label, const std::map<int, double>& dist) {
-        double sum = 0.0;
-        for (const auto& [finish, prob] : dist) {
-            sum += prob;
-        }
-        std::cout << "  " << label << " total probability mass: " << sum << "\n";
-    };
-
     std::map<int, double> pooled_p5 = engine.predict_finish_distribution(5);
 
     if (!sorted_indices.empty()) {
         const std::string& strong_driver = sorted_indices.front().first;
         const std::string& weak_driver = sorted_indices.back().first;
 
-        int strong_id = importer.get_node_id(strong_driver);
-        int weak_id = importer.get_node_id(weak_driver);
-
         std::cout << "Strong driver: " << strong_driver << " (index " << sorted_indices.front().second << ")\n";
         print_distribution("Pooled P5 distribution", pooled_p5);
-        if (strong_id >= 0) {
-            auto strong_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(strong_id));
-            std::map<int, double> strong_dist = engine.predict_finish_distribution_for_driver(5, strong_node->base_pace_delta);
-            print_distribution("Driver-aware P5 distribution", strong_dist);
-            print_distribution_sum("Driver-aware P5 distribution", strong_dist);
-        }
+        std::cout << "  Driver-aware report: " << service.report(5, strong_driver) << "\n";
 
         std::cout << "Weak driver: " << weak_driver << " (index " << sorted_indices.back().second << ")\n";
         print_distribution("Pooled P5 distribution", pooled_p5);
-        if (weak_id >= 0) {
-            auto weak_node = std::dynamic_pointer_cast<DriverNode>(g.get_node(weak_id));
-            std::map<int, double> weak_dist = engine.predict_finish_distribution_for_driver(5, weak_node->base_pace_delta);
-            print_distribution("Driver-aware P5 distribution", weak_dist);
-            print_distribution_sum("Driver-aware P5 distribution", weak_dist);
-        }
+        std::cout << "  Driver-aware report: " << service.report(5, weak_driver) << "\n";
     }
 }
 
