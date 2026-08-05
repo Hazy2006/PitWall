@@ -105,6 +105,55 @@ std::map<std::string, double> ChampionshipSimulator::points_through_race(int thr
 }
 
 std::map<std::string, double> ChampionshipSimulator::simulate_championship(int from_race, int num_simulations) const {
+    std::map<std::string, double> starting_points = points_through_race(from_race);
+    int total_races = race_count();
+    double max_remaining_points = static_cast<double>(total_races - from_race) * 25.0;
+
+    std::map<std::string, double> result;
+    for (const auto& driver : all_drivers_) {
+        result[driver] = 0.0;
+    }
+
+    // Leader = highest current points; first driver in first-seen order wins
+    // ties, matching the tie-handling used for simulated seasons below.
+    std::string leader;
+    double leader_points = -1.0;
+    for (const auto& driver : all_drivers_) {
+        double pts = starting_points.at(driver);
+        if (pts > leader_points) {
+            leader_points = pts;
+            leader = driver;
+        }
+    }
+    if (leader.empty()) {
+        return result;
+    }
+
+    // Best of everyone else, not just whoever happens to sort second.
+    double best_chaser_points = -1.0;
+    for (const auto& driver : all_drivers_) {
+        if (driver == leader) {
+            continue;
+        }
+        best_chaser_points = std::max(best_chaser_points, starting_points.at(driver));
+    }
+
+    // CLINCH: the leader's lead already exceeds the best chaser's maximum
+    // possible remaining haul -- no simulation can change the outcome.
+    if (leader_points > best_chaser_points + max_remaining_points) {
+        result[leader] = 1.0;
+        return result;
+    }
+
+    // ELIMINATION: a driver who can't catch the leader even with a perfect
+    // remaining season can never legitimately win a simulated one either.
+    std::set<std::string> eliminated;
+    for (const auto& driver : all_drivers_) {
+        if (starting_points.at(driver) + max_remaining_points < leader_points) {
+            eliminated.insert(driver);
+        }
+    }
+
     struct DriverSampler {
         std::vector<int> finishes;  // finish positions, in engine's map order
         std::discrete_distribution<int> dist;  // samples an index into finishes
@@ -132,9 +181,6 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
         sampler.dist = std::discrete_distribution<int>(weights.begin(), weights.end());
         samplers.emplace(driver, std::move(sampler));
     }
-
-    std::map<std::string, double> starting_points = points_through_race(from_race);
-    int total_races = race_count();
 
     std::map<std::string, double> win_credit;
     for (const auto& driver : all_drivers_) {
@@ -171,6 +217,13 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
         double best_points = -1.0;
         std::vector<std::string> leaders;
         for (const auto& [driver, pts] : sim_points) {
+            // Eliminated drivers are excluded from contention outright: it's
+            // mathematically impossible for one to actually have the best
+            // total here, but this guards against ever crediting one if it
+            // somehow did.
+            if (eliminated.count(driver) != 0) {
+                continue;
+            }
             if (pts > best_points) {
                 best_points = pts;
                 leaders.clear();
@@ -189,7 +242,6 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
         }
     }
 
-    std::map<std::string, double> result;
     for (const auto& driver : all_drivers_) {
         result[driver] = win_credit[driver] / static_cast<double>(num_simulations);
     }

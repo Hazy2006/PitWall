@@ -35,6 +35,7 @@ int main() {
 	print_title_odds("Title odds after race 10", service.simulate_championship(10, 10000));
 	print_title_odds("Title odds after race 15", service.simulate_championship(15, 10000));
 	print_title_odds("Title odds after race 20", service.simulate_championship(20, 10000));
+	print_title_odds("Title odds after race 23", service.simulate_championship(23, 10000));
 
 	return 0;
 }
