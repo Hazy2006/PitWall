@@ -5,13 +5,10 @@
 #include <vector>
 #include <random>
 
-// Baseline Monte Carlo championship simulator.
-//
-// Graph-free, Storage-free: depends only on a MarkovEngine (the pooled
-// grid -> finish transition model) and the results JSON, which is used to
-// derive three things -- the season's race order, each driver's actual
-// points through a given race, and each driver's rounded average grid
-// position. 
+// Baseline Monte Carlo championship simulator. Graph-free, Storage-free:
+// depends only on a MarkovEngine and the results JSON, from which it derives
+// the race order, each driver's actual points through a given race, and each
+// driver's rounded average grid position.
 class ChampionshipSimulator {
 public:
     // seed defaults to a random_device draw, so unseeded production use
@@ -20,27 +17,21 @@ public:
                           const std::string& results_json_path,
                           unsigned int seed = std::random_device{}());
 
-    // Number of races in the season: the count of distinct circuits, in the
-    // order they first appear in the results file.
+    // Distinct circuits, in first-appearance order.
     int race_count() const;
 
-    // Real points earned by every driver across races [1, through_race]
-    // (1-indexed; through_race == 0 means no races have happened yet).
-    // Scoring: 25-18-15-12-10-8-6-4-2-1 for finishing positions 1-10, 0
-    // otherwise. Every driver who appears anywhere in the season is present
-    // in the result, even with 0.0 points.
+    // Real points across races [1, through_race] (1-indexed; 0 = no races
+    // yet). Standard 25-18-15-...-1 scoring for P1-P10. Every driver appears
+    // in the result, even at 0.0, so callers don't need existence checks.
     std::map<std::string, double> points_through_race(int through_race) const;
 
-    // Simulates the remainder of the season num_simulations times.
-    // Races [1, from_race] are fixed at actual results; [from_race+1, end] are simulated.
-    // @param from_race  races up to and including this use real results; 0 = simulate all
-    // @param num_simulations  number of Monte Carlo runs
-    // @return per-driver fraction of simulations won (sums to 1.0)
-    // @note Each race: sample finish from pooled avg-grid distribution, then
-    //  sample-then-rank into a valid permutation (ties broken randomly).
-    //  Drivers with no avg grid or no pooled data score 0 for that race.
-
-
+    // Simulates the remainder of the season num_simulations times: races
+    // [1, from_race] are fixed at actual results, the rest are simulated.
+    // from_race == 0 simulates the whole season. Each simulated race samples
+    // a finish per driver from their pooled avg-grid distribution, then
+    // sample-then-ranks into a valid permutation (ties broken randomly);
+    // drivers with no avg grid or no pooled data score 0 that race.
+    // Returns each driver's fraction of simulations won (sums to 1.0).
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 
 private:
