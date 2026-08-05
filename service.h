@@ -9,20 +9,14 @@
 #include <optional>
 #include <string>
 
-// Owns the full prediction pipeline. MarkovEngine holds a const& to
-// MarkovTrainer's transition-count map, StrategyReporter holds const& to
-// both the engine and the driver-index map, and ChampionshipSimulator holds
-// a const& to the engine too -- none of that is safe unless one owner
-// controls every lifetime involved and never lets them outlive each other.
-// PitWallService is that owner: graph_, trainer_, driver_indices_,
-// importer_, engine_, simulator_, and reporter_ are declared in that order,
-// so members are destroyed in reverse -- simulator_ and reporter_ are torn
-// down before the engine/trainer/indices they reference -- and the class is
-// non-copyable/non-movable so those internal references can never end up
-// bound to a different object's members. engine_, simulator_, and
-// reporter_ are std::optional because none of them can be constructed
-// until trainer_ has run (and, for simulator_/reporter_, until engine_
-// exists).
+// Owns the full prediction pipeline. MarkovEngine, StrategyReporter, and
+// ChampionshipSimulator each hold a const& into other members here
+// (transition counts, driver indices, the engine), so one owner must control
+// every lifetime. Members are declared in dependency order so reverse-order
+// destruction tears down simulator_/reporter_ before what they reference;
+// non-copyable/non-movable keeps those references from ever binding to a
+// different object. engine_/simulator_/reporter_ are optional because they
+// can't be built until trainer_ (and then engine_) has run.
 class PitWallService {
 public:
     PitWallService();
@@ -32,10 +26,8 @@ public:
     PitWallService(PitWallService&&) = delete;
     PitWallService& operator=(PitWallService&&) = delete;
 
-    // Runs the entire pipeline: imports drivers/teams/circuits/results from
-    // data_dir, trains the Markov model, computes and applies driver
-    // indices, and builds the reporter and championship simulator. The
-    // service is fully ready after this call returns.
+    // Runs the full pipeline; the service is ready for report() and
+    // simulate_championship() once this returns.
     void load(const std::string& data_dir);
 
     std::string report(int grid_position, const std::string& driver_name) const;
