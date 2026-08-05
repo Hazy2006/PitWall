@@ -19,6 +19,8 @@ void test_driver_index_real();
 void test_strategy_reporter();
 void test_strategy_reporter_real();
 void test_championship_simulator();
+void test_championship_clinch();
+void test_championship_elimination();
 void test_championship_points_through_race();
 void test_championship_real();
 
@@ -63,6 +65,10 @@ int main() {
 	test_strategy_reporter_real();
 	std::cout << "==================================\n";
 	test_championship_simulator();
+	std::cout << "==================================\n";
+	test_championship_clinch();
+	std::cout << "==================================\n";
+	test_championship_elimination();
 	std::cout << "==================================\n";
 	test_championship_points_through_race();
 	std::cout << "==================================\n";

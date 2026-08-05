@@ -915,6 +915,119 @@ void test_championship_simulator() {
     }
 }
 
+void test_championship_clinch() {
+    std::cout << "--- Running Championship Clinch Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_championship_clinch_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Driver A wins races 1 and 2 outright (50 pts); Driver B scores 0 in
+    // both. Race 3 (Circuit Three) exists only so race_count() == 3 -- one
+    // race remains, worth at most 25 points, which can't close a 50-point
+    // gap. The leader has mathematically clinched before any simulation runs.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 11, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Two", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Two", "position": 11, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Three", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Three", "position": 2, "grid": 2, "team_name": "Team One"}
+        ])";
+    }
+
+    std::map<int, std::map<int, int>> counts;  // unused: the clinch check returns before touching the engine
+    MarkovEngine engine(counts);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    // Two different seeds: if the result depends on the seed at all, the
+    // clinch constraint isn't actually short-circuiting the RNG.
+    ChampionshipSimulator sim_a(engine, results_path.string(), /*seed=*/1);
+    ChampionshipSimulator sim_b(engine, results_path.string(), /*seed=*/999);
+
+    std::map<std::string, double> probs_a = sim_a.simulate_championship(2, 1000);
+    std::map<std::string, double> probs_b = sim_b.simulate_championship(2, 1000);
+
+    ok &= (probs_a.count("Driver A") == 1) && (std::fabs(probs_a.at("Driver A") - 1.0) < epsilon);
+    ok &= (probs_a.count("Driver B") == 1) && (std::fabs(probs_a.at("Driver B") - 0.0) < epsilon);
+    ok &= (probs_a == probs_b);
+
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] Clinched leader returned 1.0 without depending on the RNG seed.\n";
+    }
+    else {
+        std::cout << "[FAIL] Clinch constraint did not resolve the season deterministically.\n";
+    }
+}
+
+void test_championship_elimination() {
+    std::cout << "--- Running Championship Elimination Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_championship_elimination_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // After 2 races, Driver A and Driver B are tied for the lead at 43 pts
+    // each; Driver C has 0. One race remains (max 25 pts), so C's best
+    // possible total (25) can never reach 43 -- mathematically eliminated,
+    // even though the title fight between A and B is still wide open.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver C", "circuit_name": "Circuit One", "position": 11, "grid": 3, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Two", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Two", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver C", "circuit_name": "Circuit Two", "position": 11, "grid": 3, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Three", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Three", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver C", "circuit_name": "Circuit Three", "position": 3, "grid": 3, "team_name": "Team One"}
+        ])";
+    }
+
+    std::map<int, std::map<int, int>> counts;
+    counts[1][1] = 1; counts[1][2] = 1;  // grid 1 (Driver A) -> P1 or P2, 50/50
+    counts[2][1] = 1; counts[2][2] = 1;  // grid 2 (Driver B) -> P1 or P2, 50/50
+    counts[3][1] = 1;                    // grid 3 (Driver C) -> always P1 (best case; still not enough)
+    MarkovEngine engine(counts);
+
+    ChampionshipSimulator sim(engine, results_path.string(), /*seed=*/7);
+    std::map<std::string, double> probs = sim.simulate_championship(2, 1000);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    ok &= (probs.count("Driver C") == 1) && (std::fabs(probs.at("Driver C") - 0.0) < epsilon);
+
+    double sum = 0.0;
+    for (const auto& [driver, prob] : probs) {
+        sum += prob;
+    }
+    ok &= (std::fabs(sum - 1.0) < epsilon);
+
+    // The title fight between A and B must still be genuinely open --
+    // confirms this hit the real simulation path, not an accidental clinch.
+    ok &= (probs.at("Driver A") > 0.0) && (probs.at("Driver B") > 0.0);
+
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] Mathematically eliminated non-leader scored exactly 0.0 while the real contest stayed open.\n";
+    }
+    else {
+        std::cout << "[FAIL] Elimination constraint did not zero out the eliminated driver correctly.\n";
+    }
+}
+
 void test_championship_points_through_race() {
     std::cout << "--- Running Championship Points-Through-Race Test ---\n";
 

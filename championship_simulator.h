@@ -11,11 +11,11 @@
 // driver's rounded average grid position.
 class ChampionshipSimulator {
 public:
-    // seed defaults to a random_device draw, so unseeded production use
-    // varies run to run; tests pass a fixed seed for reproducibility.
+    // seed defaults to a fixed value, so unseeded use reproduces identical
+    // results run to run; pass an explicit seed to get different draws.
     ChampionshipSimulator(const MarkovEngine& engine,
                           const std::string& results_json_path,
-                          unsigned int seed = std::random_device{}());
+                          unsigned int seed = 42);
 
     // Distinct circuits, in first-appearance order.
     int race_count() const;
@@ -32,6 +32,22 @@ public:
     // sample-then-ranks into a valid permutation (ties broken randomly);
     // drivers with no avg grid or no pooled data score 0 that race.
     // Returns each driver's fraction of simulations won (sums to 1.0).
+    //
+    // Before any of that, a hard arithmetic clinch/elimination check
+    // overrides the RNG: if the leader's current lead already exceeds every
+    // rival's maximum possible remaining points, the leader wins outright
+    // (1.0, no simulation run); any driver who can't mathematically catch
+    // the leader is credited 0.0, even if the RNG would occasionally sample
+    // them into the lead.
+    //
+    // Known limitation: late-season title odds understate a dominant leader
+    // who has not yet mathematically clinched. The model uses each driver's
+    // average grid position and cannot capture race-pace dominance, so a
+    // trailing driver retains simulated title chances that were, in
+    // reality, effectively gone. The clinch/elimination constraint corrects
+    // only the arithmetically-decided cases (a leader who cannot be caught,
+    // or a driver who cannot catch up); the residual softness in
+    // not-yet-decided late races is a model limitation, not a bug.
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 
 private:
