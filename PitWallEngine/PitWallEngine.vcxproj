@@ -154,6 +154,7 @@
     <ClInclude Include="..\strategy_reporter.h" />
     <ClInclude Include="..\service.h" />
     <ClInclude Include="..\championship_simulator.h" />
+    <ClInclude Include="..\dirichlet_finish_model.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
@@ -166,6 +167,7 @@
     <ClCompile Include="..\strategy_reporter.cpp" />
     <ClCompile Include="..\service.cpp" />
     <ClCompile Include="..\championship_simulator.cpp" />
+    <ClCompile Include="..\dirichlet_finish_model.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

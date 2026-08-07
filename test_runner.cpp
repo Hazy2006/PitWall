@@ -7,6 +7,7 @@
 #include "strategy_reporter.h"
 #include "service.h"
 #include "championship_simulator.h"
+#include "dirichlet_finish_model.h"
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -856,6 +857,95 @@ void test_strategy_reporter_real() {
     std::cout << "\nVerstappen, starting P1:\n  " << reporter.report_single(1, "Max Verstappen") << "\n";
 }
 
+void test_dirichlet_finish_model() {
+    std::cout << "--- Running Dirichlet Finish Model Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_dirichlet_finish_model_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Race order: Circuit One (race1), Circuit Two (race2), Circuit Three
+    // (race3), Circuit Four (race4). Positions used anywhere in the file are
+    // {1, 2, 3}, except a single grid==0 pit-lane row (see below), so
+    // max_position == 3 and the prior is exactly {1: 1, 2: 1, 3: 1}.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver X", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver Y", "circuit_name": "Circuit One", "position": 3, "grid": 3, "team_name": "Team One"},
+            {"driver_name": "Driver X", "circuit_name": "Circuit Two", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver X", "circuit_name": "Circuit Three", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver X", "circuit_name": "Circuit Four", "position": 1, "grid": 0, "team_name": "Team One"}
+        ])";
+    }
+
+    DirichletFinishModel model(results_path.string());
+
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    ok &= (model.race_count() == 4);
+
+    // through_race == 0: no evidence at all -- pure Dirichlet(1,1,1) prior,
+    // uniform over the 3 possible finishing positions.
+    std::map<int, double> prior = model.driver_finish_distribution("Driver X", 0);
+    ok &= (prior.size() == 3);
+    for (int pos = 1; pos <= 3; ++pos) {
+        ok &= (prior.count(pos) == 1) && (std::fabs(prior.at(pos) - (1.0 / 3.0)) < epsilon);
+    }
+
+    // through_race == 2: 1 real win (race1, P1) and 1 non-win (race2, P2).
+    // Counts: prior {1:1,2:1,3:1} + evidence {1:+1,2:+1} = {1:2,2:2,3:1},
+    // sum 5 -> {1: 0.4, 2: 0.4, 3: 0.2}. Even after a win, the prior keeps
+    // this well short of 100% P1 -- exactly the overconfidence this model
+    // exists to avoid.
+    std::map<int, double> through_2 = model.driver_finish_distribution("Driver X", 2);
+    ok &= (through_2.size() == 3);
+    ok &= (through_2.count(1) == 1) && (std::fabs(through_2.at(1) - 0.4) < epsilon);
+    ok &= (through_2.count(2) == 1) && (std::fabs(through_2.at(2) - 0.4) < epsilon);
+    ok &= (through_2.count(3) == 1) && (std::fabs(through_2.at(3) - 0.2) < epsilon);
+    ok &= (through_2.at(1) < 1.0 - epsilon);
+
+    double sum_2 = 0.0;
+    for (const auto& [pos, prob] : through_2) {
+        sum_2 += prob;
+    }
+    ok &= (std::fabs(sum_2 - 1.0) < epsilon);
+
+    // through_race == 3: race3 (P1) is now in scope and must be counted.
+    // Counts: {1:2,2:2,3:1} + {1:+1} = {1:3,2:2,3:1}, sum 6
+    // -> {1: 0.5, 2: 1/3, 3: 1/6}. Must differ from through_2 above -- this
+    // proves through_race==2 genuinely excluded race3's result rather than
+    // happening to match by coincidence.
+    std::map<int, double> through_3 = model.driver_finish_distribution("Driver X", 3);
+    ok &= (through_3.size() == 3);
+    ok &= (through_3.count(1) == 1) && (std::fabs(through_3.at(1) - 0.5) < epsilon);
+    ok &= (through_3.count(2) == 1) && (std::fabs(through_3.at(2) - (1.0 / 3.0)) < epsilon);
+    ok &= (through_3.count(3) == 1) && (std::fabs(through_3.at(3) - (1.0 / 6.0)) < epsilon);
+    ok &= (through_3 != through_2);
+
+    // through_race == 4: race4 is a grid==0 pit-lane row for Driver X and
+    // must be skipped for evidence, consistent with existing grid==0
+    // filters elsewhere -- so this must equal through_3 exactly.
+    std::map<int, double> through_4 = model.driver_finish_distribution("Driver X", 4);
+    ok &= (through_4 == through_3);
+
+    // Unknown driver -> empty map, no fabricated distribution.
+    std::map<int, double> unknown = model.driver_finish_distribution("Nobody", 4);
+    ok &= unknown.empty();
+
+    if (ok) {
+        std::cout << "[PASS] DirichletFinishModel matched hand-calculated posteriors, excluded future races, "
+                     "skipped grid==0 evidence, and returned no data for an unknown driver.\n";
+    }
+    else {
+        std::cout << "[FAIL] DirichletFinishModel output did not match expectations.\n";
+    }
+}
+
 void test_championship_simulator() {
     std::cout << "--- Running Championship Simulator Test ---\n";
 
@@ -864,21 +954,34 @@ void test_championship_simulator() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // One race, two drivers. Driver A starts P1, Driver B starts P2 -- and
-    // their average grids feed a rigged engine below where grid 1 ALWAYS
-    // finishes P1 and grid 2 ALWAYS finishes P2, so Driver A must win every
-    // simulation of this single remaining race.
+    // 20 races, two drivers: Driver A always finishes P1, Driver B always
+    // finishes P2. Simulating from race 10 (10 real races locked in, 10
+    // remaining) means Driver A's Dirichlet posterior through race 10 is
+    // built from a real 10-0 record -- heavily favoring P1 -- while still
+    // leaving enough remaining points (10 races x 25 max) that the
+    // clinch/elimination shortcut can't resolve this outright; the win
+    // probability below has to come from the real sample-then-rank RNG path.
+    // A Dirichlet prior always keeps a little mass on every position for a
+    // single race -- unlike the old rig, which pooled a distribution with
+    // zero mass anywhere else -- but that residual mass is thin enough here
+    // that it may not even show up over 1000 simulated 10-race seasons; the
+    // assertions below check for overwhelming dominance, not the exact 1.0
+    // the old engine-based rig guaranteed structurally.
     {
+        std::ostringstream rows;
+        for (int race = 1; race <= 20; ++race) {
+            std::string circuit = "Circuit " + std::to_string(race);
+            rows << R"({"driver_name": "Driver A", "circuit_name": ")" << circuit << R"(", "position": 1, "grid": 1, "team_name": "Team One"},)";
+            rows << R"({"driver_name": "Driver B", "circuit_name": ")" << circuit << R"(", "position": 2, "grid": 2, "team_name": "Team One"})";
+            if (race != 20) {
+                rows << ",";
+            }
+        }
         std::ofstream f(results_path);
-        f << R"([
-            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
-            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team One"}
-        ])";
+        f << "[" << rows.str() << "]";
     }
 
-    std::map<int, std::map<int, int>> counts;
-    counts[1][1] = 100;  // grid 1 -> always finishes P1
-    counts[2][2] = 100;  // grid 2 -> always finishes P2
+    std::map<int, std::map<int, int>> counts;  // unused: the default path no longer consults the engine
     MarkovEngine engine(counts);
 
     const double epsilon = 1e-9;
@@ -886,11 +989,11 @@ void test_championship_simulator() {
 
     const unsigned int seed = 12345;
     ChampionshipSimulator sim1(engine, results_path.string(), seed);
-    std::map<std::string, double> probs = sim1.simulate_championship(0, 1000);
+    std::map<std::string, double> probs = sim1.simulate_championship(10, 1000);
 
     ok &= (probs.size() == 2);
-    ok &= (probs.count("Driver A") == 1) && (std::fabs(probs.at("Driver A") - 1.0) < epsilon);
-    ok &= (probs.count("Driver B") == 1) && (std::fabs(probs.at("Driver B") - 0.0) < epsilon);
+    ok &= (probs.count("Driver A") == 1) && (probs.at("Driver A") > 0.95);
+    ok &= (probs.count("Driver B") == 1) && (probs.at("Driver B") < 0.05);
 
     double sum = 0.0;
     for (const auto& [driver, prob] : probs) {
@@ -901,17 +1004,18 @@ void test_championship_simulator() {
     // Determinism: a fresh simulator built from the same data and the same
     // seed must reproduce the exact same result.
     ChampionshipSimulator sim2(engine, results_path.string(), seed);
-    std::map<std::string, double> probs_repeat = sim2.simulate_championship(0, 1000);
+    std::map<std::string, double> probs_repeat = sim2.simulate_championship(10, 1000);
     ok &= (probs_repeat == probs);
 
     fs::remove_all(temp_dir);
 
     if (ok) {
-        std::cout << "[PASS] ChampionshipSimulator guaranteed the rigged winner, probabilities summed to 1.0, "
-                     "and results were reproducible under a fixed seed.\n";
+        std::cout << "[PASS] ChampionshipSimulator made the historically dominant driver an overwhelming favorite, "
+                     "probabilities summed to 1.0, and results were reproducible under a fixed seed.\n";
     }
     else {
-        std::cout << "[FAIL] ChampionshipSimulator output did not match expectations.\n";
+        std::cout << "[FAIL] ChampionshipSimulator output did not match expectations "
+                     "(Driver A: " << probs["Driver A"] << ", Driver B: " << probs["Driver B"] << ").\n";
     }
 }
 
