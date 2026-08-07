@@ -29,10 +29,22 @@ namespace {
     }
 }
 
+ChampionshipSimulator::DriverSampler ChampionshipSimulator::make_sampler(const std::map<int, double>& distribution) {
+    DriverSampler sampler;
+    std::vector<double> weights;
+    weights.reserve(distribution.size());
+    for (const auto& [finish, prob] : distribution) {
+        sampler.finishes.push_back(finish);
+        weights.push_back(prob);
+    }
+    sampler.dist = std::discrete_distribution<int>(weights.begin(), weights.end());
+    return sampler;
+}
+
 ChampionshipSimulator::ChampionshipSimulator(const MarkovEngine& engine,
                                               const std::string& results_json_path,
                                               unsigned int seed)
-    : engine_(engine), rng_(seed) {
+    : engine_(engine), dirichlet_model_(results_json_path), rng_(seed) {
     load_results(results_json_path);
 }
 
@@ -104,6 +116,34 @@ std::map<std::string, double> ChampionshipSimulator::points_through_race(int thr
     return points;
 }
 
+std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulator::build_avg_grid_samplers() const {
+    std::map<std::string, DriverSampler> samplers;
+    for (const auto& driver : all_drivers_) {
+        auto grid_it = avg_grid_rounded_.find(driver);
+        if (grid_it == avg_grid_rounded_.end()) {
+            continue;  // no valid average grid -- skipped in every remaining race
+        }
+        std::map<int, double> distribution = engine_.predict_finish_distribution(grid_it->second);
+        if (distribution.empty()) {
+            continue;  // engine has no pooled data for this grid -- skipped
+        }
+        samplers.emplace(driver, make_sampler(distribution));
+    }
+    return samplers;
+}
+
+std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulator::build_bayesian_samplers(int from_race) const {
+    std::map<std::string, DriverSampler> samplers;
+    for (const auto& driver : all_drivers_) {
+        std::map<int, double> distribution = dirichlet_model_.driver_finish_distribution(driver, from_race);
+        if (distribution.empty()) {
+            continue;  // driver unknown to the Dirichlet model -- skipped in every remaining race
+        }
+        samplers.emplace(driver, make_sampler(distribution));
+    }
+    return samplers;
+}
+
 std::map<std::string, double> ChampionshipSimulator::simulate_championship(int from_race, int num_simulations) const {
     std::map<std::string, double> starting_points = points_through_race(from_race);
     int total_races = race_count();
@@ -154,33 +194,10 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
         }
     }
 
-    struct DriverSampler {
-        std::vector<int> finishes;  // finish positions, in engine's map order
-        std::discrete_distribution<int> dist;  // samples an index into finishes
-    };
-
-    // Built once per call, not once per simulated race: a driver's average
-    // grid (and thus their pooled distribution) never changes across races.
-    std::map<std::string, DriverSampler> samplers;
-    for (const auto& driver : all_drivers_) {
-        auto grid_it = avg_grid_rounded_.find(driver);
-        if (grid_it == avg_grid_rounded_.end()) {
-            continue;  // no valid average grid -- skipped in every remaining race
-        }
-        std::map<int, double> distribution = engine_.predict_finish_distribution(grid_it->second);
-        if (distribution.empty()) {
-            continue;  // engine has no pooled data for this grid -- skipped
-        }
-
-        DriverSampler sampler;
-        std::vector<double> weights;
-        for (const auto& [finish, prob] : distribution) {
-            sampler.finishes.push_back(finish);
-            weights.push_back(prob);
-        }
-        sampler.dist = std::discrete_distribution<int>(weights.begin(), weights.end());
-        samplers.emplace(driver, std::move(sampler));
-    }
+    // Built once per call, not once per simulated race: each driver's finish
+    // distribution (Dirichlet posterior through from_race) never changes
+    // across the remaining races being simulated.
+    std::map<std::string, DriverSampler> samplers = build_bayesian_samplers(from_race);
 
     std::map<std::string, double> win_credit;
     for (const auto& driver : all_drivers_) {

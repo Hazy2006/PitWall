@@ -18,6 +18,7 @@ void test_driver_aware_prediction();
 void test_driver_index_real();
 void test_strategy_reporter();
 void test_strategy_reporter_real();
+void test_dirichlet_finish_model();
 void test_championship_simulator();
 void test_championship_clinch();
 void test_championship_elimination();
@@ -63,6 +64,8 @@ int main() {
 	test_strategy_reporter();
 	std::cout << "==================================\n";
 	test_strategy_reporter_real();
+	std::cout << "==================================\n";
+	test_dirichlet_finish_model();
 	std::cout << "==================================\n";
 	test_championship_simulator();
 	std::cout << "==================================\n";
