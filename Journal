@@ -133,3 +133,93 @@ strategy, tire degradation, and an LLM, none of which exist. Now it says
 what PitWall actually is: a grid→finish predictor with documented limits.
 Realized the "service layer" I planned on Day 1 was never actually built —
 orche
+
+
+Dev Log — August 3-7, 2026
+PitWall — Markov model, the big audit, service layer, and going Bayesian
+
+Massive stretch. Went from "graph engine with data" to an actual honest
+forecaster. A lot happened so this is the long one.
+
+Markov model (Phase 5):
+Built the actual prediction layer. Scoped it down hard on purpose — the
+README dreamed of a (driver, circuit, lap, tire, position) state space but
+one season can't fill that, most cells would have one data point or zero.
+Went pooled grid -> finish instead. Every grid slot has ~20 real
+observations so the numbers actually mean something. Trainer counts
+grid->finish transitions (raw integer counts, normalize at query time),
+engine turns a grid position into a probability distribution. Smell-tested
+it: pole predicts a P1 finish 46% of the time. That's real, 2024 was
+front-runner heavy. Model matched reality without me hardcoding anything,
+that's when I started trusting it.
+
+Then the driver index (5b). Killed the idea of per-driver matrices — same
+one-season starvation problem, each driver raced each circuit once. Went
+with a handicap instead: one number per driver = average positions
+gained/lost (grid - finish). Shifts the pooled distribution. Finally put
+real values into param2 which had been 0.0 forever.
+
+The audit — this is where it got good:
+- Driver index was ranking substitutes (Colapinto, Bearman, ~5-9 races)
+  above full-season guys like Hamilton. One good drive over few races
+  spikes the average. Added a 10-race minimum, documented it honestly in
+  the README instead of hiding it.
+- Dropped 3 dead edge fields (affinity_score, performance_delta,
+  tire_preference), all 0.0, no feature was ever going to fill them.
+  Speculative schema from day 1. Lean schema reads as finished.
+- The shift was rounding the index to an integer, so +1.875 and +1.2
+  collapsed to the same shift, throwing away precision I'd computed.
+  Switched to fractional shift with mass interpolation. Had to watch the
+  "sums to 1.0" invariant like a madman.
+
+Strategy reporter (Phase 6): deterministic string composition, NO LLM, on
+purpose. An LLM can claim things the numbers don't support, a template
+can't. States only what the data backs and honestly says "no adjustment
+available" for filtered-out drivers instead of faking one. Also rewrote the
+README, which had drifted into fiction (promised pit strategy, tire
+degradation, an LLM, none of which exist).
+
+Service layer: realized the "service" I planned on day 1 was never actually
+built — orchestration was scattered across main and the tests. Extracted a
+real PitWallService that owns the whole pipeline, load() does everything,
+main became thin. Also split app and tests into two separate build targets
+(PitWallEngine.exe + PitWallTests.exe). Caught a tricky one here: two of the
+tests used assert(), which gets compiled OUT in Release builds, so they'd
+silently pass without testing anything. Converted them to the ok &= pattern
+so they actually run in Release.
+
+Championship simulator (Phase 7): Monte Carlo, simulate the rest of the
+season from any point, report title odds. Sample-then-rank so no two drivers
+"finish P1" in the same race. Validated it from scratch — reproduced the
+real 2024 top 4 (Verstappen, Norris, Leclerc, Piastri) from nothing but
+average grid positions. Added a clinch/elimination constraint: if a driver
+literally can't be caught mathematically, they're 100%, no simulation needed.
+This last feature is not as accurate as real life behaviour but it's still
+a good assset - for me at least.
+
+The Bayesian rework (the big one):
+This is the exact thing i needed and wanted.
+Noticed the sim gave Verstappen 88% after only 5 races. That's wrong — after
+5 races you know almost nothing. Dug in and found the real problem: the sim
+used full-SEASON average grid, so forecasting "from race 5" was secretly
+peeking at all 24 races. Future leakage. It wasn't predicting, it was
+pretending to.
+
+Fixed it properly with a Dirichlet prior. Give every driver a fake "starter
+kit" — pretend they've finished once in every position before the season
+starts. Then add their real finishes from races 1..N only, never the future.
+Early season the fake counts dominate so nobody looks certain, late season
+real data swamps the prior and it sharpens. Bayesian updating, but it's just
+counting. Result: Verstappen at race 5 dropped from 88% to 60.7%, with Pérez
+and Leclerc holding real chances. Honest uncertainty early, confident late.
+
+One thing I confirmed rather than "fixed": race 20 odds dip slightly
+(Verstappen 95.7% at race 15 -> 90.3% at race 20). Checked who holds the
+gap — it's Norris at 9.3%. That's correct, not a bug: the model's picking up
+McLaren's real late-season surge. A forecaster SHOULD raise a driver's odds
+when they're finishing well recently. Left it, documented it.
+
+Where it stands: honest Bayesian championship forecaster, leakage-free,
+19 tests green, both build targets clean. 
+
+Next: comparative reports (driver vs driver), final README 
