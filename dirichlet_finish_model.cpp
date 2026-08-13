@@ -1,6 +1,7 @@
 #include "dirichlet_finish_model.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 
@@ -16,6 +17,12 @@ namespace {
         file >> data;
         return data;
     }
+
+    // Exponential recency decay applied to evidence: a race k races before
+    // the cutoff contributes lambda^k instead of a flat 1.0. 0.85 balances
+    // responsiveness to recent form against overreacting to a single race;
+    // higher approaches equal weighting, lower becomes too jumpy.
+    constexpr double RECENCY_LAMBDA = 0.85;
 }
 
 DirichletFinishModel::DirichletFinishModel(const std::string& results_json_path) {
@@ -42,7 +49,7 @@ void DirichletFinishModel::load(const std::string& results_json_path) {
         max_position_ = std::max(max_position_, position);
 
         if (grid == 0) {
-            continue;  // pit-lane start: excluded as evidence, consistent with existing filters
+            continue;  // pit-lane starts carry no finish-position evidence
         }
         int race_index = race_index_by_circuit.at(circuit);
         driver_race_finishes_[driver].emplace_back(race_index, position);
@@ -58,28 +65,33 @@ std::map<int, double> DirichletFinishModel::driver_finish_distribution(const std
         return {};
     }
 
-    std::map<int, int> counts;
+    std::map<int, double> counts;
     for (int pos = 1; pos <= max_position_; ++pos) {
-        counts[pos] = 1;  // Dirichlet(1,...,1) prior
+        counts[pos] = 1.0;  // Dirichlet(1,...,1) prior
     }
 
     auto it = driver_race_finishes_.find(driver_name);
     if (it != driver_race_finishes_.end()) {
         for (const auto& [race_index, position] : it->second) {
             if (race_index < through_race) {
-                counts[position] += 1;
+                // race_index is 0-based, through_race is a 1-based cutoff;
+                // race_index + 1 is this race's 1-based number, so k counts
+                // how many races before the cutoff it happened.
+                int k = through_race - (race_index + 1);
+                counts[position] += std::pow(RECENCY_LAMBDA, k);
             }
         }
     }
 
-    int total = 0;
+    double total = 0.0;
     for (const auto& [pos, count] : counts) {
         total += count;
     }
 
+    // Normalize counts into the posterior probability distribution.
     std::map<int, double> distribution;
     for (const auto& [pos, count] : counts) {
-        distribution[pos] = static_cast<double>(count) / static_cast<double>(total);
+        distribution[pos] = count / total;
     }
     return distribution;
 }

@@ -54,9 +54,7 @@ void run_edge_tests() {
     int driver_id = g.add_node(leclerc);
     int circuit_id = g.add_node(monaco);
 
-    Edge stats = {
-        0.15,  // winRate
-    };
+    Edge stats = { 0.15 };
 
     g.add_edge(driver_id, circuit_id, stats);
 
@@ -542,15 +540,14 @@ void test_driver_index() {
 
     {
         std::ostringstream rows;
-        // Alpha: exactly 10 valid (grid != 0) rows, each (grid - finish) = 3 -> mean = 3.0.
-        // Meets the >= 10 valid-row threshold, so it must appear in the result.
+        // Alpha: 10 valid rows at (grid - finish) = 3 -> mean 3.0, meets the 10-row threshold.
         for (int i = 0; i < 10; ++i) {
             rows << R"({"driver_name": "Alpha", "circuit_name": "Circuit One", "position": 2, "grid": 5, "team_name": "Team One"},)";
         }
-        // Beta: 2 valid rows -> below the threshold -> must be omitted entirely.
+        // Beta: only 2 valid rows -> below threshold -> omitted.
         rows << R"({"driver_name": "Beta", "circuit_name": "Circuit One", "position": 6, "grid": 3, "team_name": "Team Two"},)";
         rows << R"({"driver_name": "Beta", "circuit_name": "Circuit Two", "position": 2, "grid": 1, "team_name": "Team Two"},)";
-        // Gamma: only a grid==0 row -> zero valid rows -> must be omitted entirely.
+        // Gamma: grid==0 only -> zero valid rows -> omitted.
         rows << R"({"driver_name": "Gamma", "circuit_name": "Circuit One", "position": 9, "grid": 0, "team_name": "Team Three"})";
 
         std::ofstream f(results_path);
@@ -565,18 +562,11 @@ void test_driver_index() {
     const double epsilon = 1e-9;
     bool ok = true;
 
-    // Alpha: 10 valid rows, each contributing 3 -> mean = 3.0, meets the threshold.
     ok &= (indices.count("Alpha") == 1);
     ok &= (std::fabs(indices.at("Alpha") - 3.0) < epsilon);
-
-    // Beta: only 2 valid rows -> below the 10-row minimum -> omitted from the map.
     ok &= (indices.count("Beta") == 0);
-
-    // Gamma: zero valid rows -> below the 10-row minimum -> omitted from the map.
     ok &= (indices.count("Gamma") == 0);
-
-    // Only drivers meeting the threshold are present at all.
-    ok &= (indices.size() == 1);
+    ok &= (indices.size() == 1);  // only drivers meeting the threshold are present
 
     if (ok) {
         std::cout << "[PASS] compute_driver_indices computed correct means and filtered grid==0 rows.\n";
@@ -599,11 +589,8 @@ void test_driver_aware_prediction() {
     const double epsilon = 1e-9;
     bool ok = true;
 
-    // Pooled: {1: 0.25, 2: 0.25, 3: 0.5}
-    // driver_index = +1.0 is an exact integer shift (no fractional split):
-    // finish 1 -> target 0 -> clamped to 1, finish 2 -> target 1 -> 1,
-    // finish 3 -> target 2 -> 2
-    // Result: {1: 0.5, 2: 0.5}
+    // driver_index = +1.0 is an exact integer shift (no fractional split);
+    // expected result: {1: 0.5, 2: 0.5}.
     std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(1, 1.0);
 
     ok &= (shifted.size() == 2);
@@ -631,21 +618,15 @@ void test_driver_aware_prediction() {
 
     // --- Fractional shift with mass interpolation ---
     std::map<int, std::map<int, int>> counts2;
-    // grid 5: finish 2 x2 (0.2), finish 5 x3 (0.3), finish 8 x5 (0.5), total 10
     counts2[5][2] = 2;
     counts2[5][5] = 3;
     counts2[5][8] = 5;
 
     MarkovEngine engine2(counts2);
 
-    // Pooled: {2: 0.2, 5: 0.3, 8: 0.5}, max_finish = 8, driver_index = 2.4
-    // finish 2: target = 2 - 2.4 = -0.4 -> lo=-1, hi=0, both clamp to 1
-    //           -> shifted[1] += 0.2 * 1.0 = 0.2
-    // finish 5: target = 5 - 2.4 = 2.6 -> lo=2, hi=3, no clamping needed
-    //           -> shifted[2] += 0.3 * 0.4 = 0.12, shifted[3] += 0.3 * 0.6 = 0.18
-    // finish 8: target = 8 - 2.4 = 5.6 -> lo=5, hi=6, no clamping needed
-    //           -> shifted[5] += 0.5 * 0.4 = 0.2, shifted[6] += 0.5 * 0.6 = 0.3
-    // Result: {1: 0.2, 2: 0.12, 3: 0.18, 5: 0.2, 6: 0.3}
+    // driver_index = 2.4: each bucket's mass splits across the two
+    // straddling integer positions; expected result computed by hand as
+    // {1: 0.2, 2: 0.12, 3: 0.18, 5: 0.2, 6: 0.3}.
     std::map<int, double> fractional = engine2.predict_finish_distribution_for_driver(5, 2.4);
 
     ok &= (fractional.size() == 5);
@@ -662,18 +643,9 @@ void test_driver_aware_prediction() {
     }
     ok &= (std::fabs(fractional_sum - 1.0) < epsilon);
 
-    // A fractional index must NOT collapse to the same result as its rounded
-    // integer counterpart -- this is the whole point of dropping std::llround.
-    // On the grid-1 pooled distribution {1: 0.25, 2: 0.25, 3: 0.5}:
-    //   index 1.5 -> finish 1: target -0.5 -> clamps to 1 (mass 0.25)
-    //                finish 2: target  0.5 -> lo=0/hi=1, both clamp to 1 (mass 0.25)
-    //                finish 3: target  1.5 -> lo=1/hi=2, split 0.5/0.5 (mass 0.5)
-    //                Result: {1: 0.75, 2: 0.25}
-    //   index 2.0 -> every target is an exact integer <= 1 -> fully clamped to P1
-    //                Result: {1: 1.0}
-    // Under the old std::llround-based shift both 1.5 and 2.0 rounded to the
-    // same integer shift and produced an identical distribution; they must
-    // now differ.
+    // A fractional index must not collapse to its rounded integer
+    // counterpart's result -- proves the shift uses full precision, not
+    // std::llround (which would make 1.5 and 2.0 indistinguishable).
     std::map<int, double> frac_index = engine.predict_finish_distribution_for_driver(1, 1.5);
     std::map<int, double> rounded_index = engine.predict_finish_distribution_for_driver(1, 2.0);
 
@@ -719,12 +691,8 @@ void test_driver_index_real() {
         std::cout << "  " << sorted_indices[idx].first << " : " << sorted_indices[idx].second << "\n";
     }
 
-    // Part C: run the same real data through the full PitWallService pipeline
-    // (import, train, write indices into the graph, build the reporter) and
-    // confirm the strong/weak drivers' reports reflect their computed indices.
-    // This is the same integration point the old apply_driver_indices helper
-    // covered directly; it now lives in the service instead of being
-    // duplicated here.
+    // Integration check: the full service pipeline should produce reports
+    // consistent with the strong/weak drivers' computed indices.
     PitWallService service;
     service.load("data");
 
@@ -788,9 +756,7 @@ void test_strategy_reporter() {
     ok &= (report.find("P8") != std::string::npos);
     ok &= (report.find("20%") != std::string::npos);
 
-    // Driver adjustment: index rounded to 1 decimal, and the actual
-    // shifted most-likely finish computed via predict_finish_distribution_for_driver
-    // (pooled {4:0.5,6:0.3,8:0.2} shifted by 1.85 -> most mass, 0.425, lands on P2).
+    // Index rounds to 1.9; shifted distribution's most mass lands on P2.
     ok &= (report.find("Test Driver tends to gain 1.9 positions") != std::string::npos);
     ok &= (report.find("P2") != std::string::npos);
 
@@ -865,10 +831,8 @@ void test_dirichlet_finish_model() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // Race order: Circuit One (race1), Circuit Two (race2), Circuit Three
-    // (race3), Circuit Four (race4). Positions used anywhere in the file are
-    // {1, 2, 3}, except a single grid==0 pit-lane row (see below), so
-    // max_position == 3 and the prior is exactly {1: 1, 2: 1, 3: 1}.
+    // 4 races; positions used are {1, 2, 3}, so max_position == 3 and the
+    // prior is exactly {1: 1, 2: 1, 3: 1}. Race 4 is a grid==0 pit-lane row.
     {
         std::ofstream f(results_path);
         f << R"([
@@ -885,28 +849,32 @@ void test_dirichlet_finish_model() {
     fs::remove_all(temp_dir);
 
     const double epsilon = 1e-9;
+    const double lambda = 0.85;
     bool ok = true;
 
     ok &= (model.race_count() == 4);
 
-    // through_race == 0: no evidence at all -- pure Dirichlet(1,1,1) prior,
-    // uniform over the 3 possible finishing positions.
+    // No evidence yet -- pure Dirichlet(1,1,1) prior, uniform over positions.
     std::map<int, double> prior = model.driver_finish_distribution("Driver X", 0);
     ok &= (prior.size() == 3);
     for (int pos = 1; pos <= 3; ++pos) {
         ok &= (prior.count(pos) == 1) && (std::fabs(prior.at(pos) - (1.0 / 3.0)) < epsilon);
     }
 
-    // through_race == 2: 1 real win (race1, P1) and 1 non-win (race2, P2).
-    // Counts: prior {1:1,2:1,3:1} + evidence {1:+1,2:+1} = {1:2,2:2,3:1},
-    // sum 5 -> {1: 0.4, 2: 0.4, 3: 0.2}. Even after a win, the prior keeps
-    // this well short of 100% P1 -- exactly the overconfidence this model
-    // exists to avoid.
+    // Through race 2: race1 (P1) is k=1 race back, race2 (P2) is k=0 (most
+    // recent) -- weighted counts {1: 1+lambda^1, 2: 1+lambda^0, 3: 1}.
+    double c2_1 = 1.0 + std::pow(lambda, 1);
+    double c2_2 = 1.0 + std::pow(lambda, 0);
+    double c2_3 = 1.0;
+    double c2_total = c2_1 + c2_2 + c2_3;
+
     std::map<int, double> through_2 = model.driver_finish_distribution("Driver X", 2);
     ok &= (through_2.size() == 3);
-    ok &= (through_2.count(1) == 1) && (std::fabs(through_2.at(1) - 0.4) < epsilon);
-    ok &= (through_2.count(2) == 1) && (std::fabs(through_2.at(2) - 0.4) < epsilon);
-    ok &= (through_2.count(3) == 1) && (std::fabs(through_2.at(3) - 0.2) < epsilon);
+    ok &= (through_2.count(1) == 1) && (std::fabs(through_2.at(1) - c2_1 / c2_total) < epsilon);
+    ok &= (through_2.count(2) == 1) && (std::fabs(through_2.at(2) - c2_2 / c2_total) < epsilon);
+    ok &= (through_2.count(3) == 1) && (std::fabs(through_2.at(3) - c2_3 / c2_total) < epsilon);
+    // The prior keeps this well short of 100% P1 -- the overconfidence this
+    // model exists to avoid.
     ok &= (through_2.at(1) < 1.0 - epsilon);
 
     double sum_2 = 0.0;
@@ -915,34 +883,132 @@ void test_dirichlet_finish_model() {
     }
     ok &= (std::fabs(sum_2 - 1.0) < epsilon);
 
-    // through_race == 3: race3 (P1) is now in scope and must be counted.
-    // Counts: {1:2,2:2,3:1} + {1:+1} = {1:3,2:2,3:1}, sum 6
-    // -> {1: 0.5, 2: 1/3, 3: 1/6}. Must differ from through_2 above -- this
-    // proves through_race==2 genuinely excluded race3's result rather than
-    // happening to match by coincidence.
+    // Through race 3: race1 (P1) is k=2, race2 (P2) is k=1, race3 (P1) is
+    // k=0 -- P1 now carries two weighted observations, one of them the most
+    // recent race.
+    double c3_1 = 1.0 + std::pow(lambda, 2) + std::pow(lambda, 0);
+    double c3_2 = 1.0 + std::pow(lambda, 1);
+    double c3_3 = 1.0;
+    double c3_total = c3_1 + c3_2 + c3_3;
+
     std::map<int, double> through_3 = model.driver_finish_distribution("Driver X", 3);
     ok &= (through_3.size() == 3);
-    ok &= (through_3.count(1) == 1) && (std::fabs(through_3.at(1) - 0.5) < epsilon);
-    ok &= (through_3.count(2) == 1) && (std::fabs(through_3.at(2) - (1.0 / 3.0)) < epsilon);
-    ok &= (through_3.count(3) == 1) && (std::fabs(through_3.at(3) - (1.0 / 6.0)) < epsilon);
+    ok &= (through_3.count(1) == 1) && (std::fabs(through_3.at(1) - c3_1 / c3_total) < epsilon);
+    ok &= (through_3.count(2) == 1) && (std::fabs(through_3.at(2) - c3_2 / c3_total) < epsilon);
+    ok &= (through_3.count(3) == 1) && (std::fabs(through_3.at(3) - c3_3 / c3_total) < epsilon);
+    // Must differ from through_2, proving through_race==2 genuinely
+    // excluded race3 (and that its weights actually recomputed, not just
+    // reused a cached ratio).
     ok &= (through_3 != through_2);
 
-    // through_race == 4: race4 is a grid==0 pit-lane row for Driver X and
-    // must be skipped for evidence, consistent with existing grid==0
-    // filters elsewhere -- so this must equal through_3 exactly.
+    // race4 is grid==0 -> no new evidence -- but the cutoff still advances,
+    // so race1..race3's existing evidence decays one step further even
+    // though nothing new was added. k is measured from the cutoff N, not
+    // from the latest evidence-bearing race.
+    double c4_1 = 1.0 + std::pow(lambda, 3) + std::pow(lambda, 1);
+    double c4_2 = 1.0 + std::pow(lambda, 2);
+    double c4_3 = 1.0;
+    double c4_total = c4_1 + c4_2 + c4_3;
+
     std::map<int, double> through_4 = model.driver_finish_distribution("Driver X", 4);
-    ok &= (through_4 == through_3);
+    ok &= (through_4.size() == 3);
+    ok &= (through_4.count(1) == 1) && (std::fabs(through_4.at(1) - c4_1 / c4_total) < epsilon);
+    ok &= (through_4.count(2) == 1) && (std::fabs(through_4.at(2) - c4_2 / c4_total) < epsilon);
+    ok &= (through_4.count(3) == 1) && (std::fabs(through_4.at(3) - c4_3 / c4_total) < epsilon);
+    // P1's mass should have decayed relative to through_3, since its
+    // evidence is now one race further in the past with nothing new to
+    // offset it.
+    ok &= (through_4.at(1) < through_3.at(1));
 
     // Unknown driver -> empty map, no fabricated distribution.
     std::map<int, double> unknown = model.driver_finish_distribution("Nobody", 4);
     ok &= unknown.empty();
 
     if (ok) {
-        std::cout << "[PASS] DirichletFinishModel matched hand-calculated posteriors, excluded future races, "
-                     "skipped grid==0 evidence, and returned no data for an unknown driver.\n";
+        std::cout << "[PASS] DirichletFinishModel matched hand-calculated recency-weighted posteriors, excluded "
+                     "future races, skipped grid==0 evidence, and returned no data for an unknown driver.\n";
     }
     else {
         std::cout << "[FAIL] DirichletFinishModel output did not match expectations.\n";
+    }
+}
+
+void test_dirichlet_recency_weighting() {
+    std::cout << "--- Running Dirichlet Recency Weighting Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_dirichlet_recency_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Driver Z: worst finish (P5) in race 1, steadily improving to a win
+    // (P1) in race 4 -- an improving-driver arc (like Norris's) that
+    // equal-weighting would underrate relative to a flash of early-season
+    // form.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver Z", "circuit_name": "Circuit One", "position": 5, "grid": 5, "team_name": "Team One"},
+            {"driver_name": "Driver Z", "circuit_name": "Circuit Two", "position": 4, "grid": 4, "team_name": "Team One"},
+            {"driver_name": "Driver Z", "circuit_name": "Circuit Three", "position": 3, "grid": 3, "team_name": "Team One"},
+            {"driver_name": "Driver Z", "circuit_name": "Circuit Four", "position": 1, "grid": 1, "team_name": "Team One"}
+        ])";
+    }
+
+    DirichletFinishModel model(results_path.string());
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    const double lambda = 0.85;
+    bool ok = true;
+
+    std::map<int, double> through_4 = model.driver_finish_distribution("Driver Z", 4);
+    ok &= (through_4.size() == 5);
+
+    // Hand-computed evidence: race r (1-based) contributes lambda^(4-r) to
+    // its finishing position, added on top of the Dirichlet(1,...,1) prior.
+    std::map<int, double> expected_counts;
+    for (int pos = 1; pos <= 5; ++pos) {
+        expected_counts[pos] = 1.0;  // prior
+    }
+    expected_counts[5] += std::pow(lambda, 4 - 1);  // race 1 -> P5, k=3
+    expected_counts[4] += std::pow(lambda, 4 - 2);  // race 2 -> P4, k=2
+    expected_counts[3] += std::pow(lambda, 4 - 3);  // race 3 -> P3, k=1
+    expected_counts[1] += std::pow(lambda, 4 - 4);  // race 4 -> P1, k=0
+
+    double expected_total = 0.0;
+    for (const auto& [pos, count] : expected_counts) {
+        expected_total += count;
+    }
+
+    for (int pos = 1; pos <= 5; ++pos) {
+        double expected_prob = expected_counts.at(pos) / expected_total;
+        ok &= (through_4.count(pos) == 1) && (std::fabs(through_4.at(pos) - expected_prob) < epsilon);
+    }
+
+    double sum = 0.0;
+    for (const auto& [pos, prob] : through_4) {
+        sum += prob;
+    }
+    ok &= (std::fabs(sum - 1.0) < epsilon);
+
+    // The most recent finish (P1, race 4, k=0) must outweigh the oldest,
+    // worst finish (P5, race 1, k=3) even though both are single
+    // observations -- recency dominates raw frequency.
+    ok &= (through_4.at(1) > through_4.at(5));
+
+    // Decay is monotonic with recency: P1 (k=0) > P3 (k=1) > P4 (k=2) >
+    // P5 (k=3), each one race further in the past.
+    ok &= (through_4.at(1) > through_4.at(3));
+    ok &= (through_4.at(3) > through_4.at(4));
+    ok &= (through_4.at(4) > through_4.at(5));
+
+    if (ok) {
+        std::cout << "[PASS] DirichletFinishModel weighted evidence by exponential recency (lambda=0.85), matched "
+                     "hand-computed weighted counts, and let a recent win outweigh an older, worse finish.\n";
+    }
+    else {
+        std::cout << "[FAIL] DirichletFinishModel recency weighting did not match expectations.\n";
     }
 }
 
@@ -954,19 +1020,12 @@ void test_championship_simulator() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // 20 races, two drivers: Driver A always finishes P1, Driver B always
-    // finishes P2. Simulating from race 10 (10 real races locked in, 10
-    // remaining) means Driver A's Dirichlet posterior through race 10 is
-    // built from a real 10-0 record -- heavily favoring P1 -- while still
-    // leaving enough remaining points (10 races x 25 max) that the
-    // clinch/elimination shortcut can't resolve this outright; the win
-    // probability below has to come from the real sample-then-rank RNG path.
-    // A Dirichlet prior always keeps a little mass on every position for a
-    // single race -- unlike the old rig, which pooled a distribution with
-    // zero mass anywhere else -- but that residual mass is thin enough here
-    // that it may not even show up over 1000 simulated 10-race seasons; the
-    // assertions below check for overwhelming dominance, not the exact 1.0
-    // the old engine-based rig guaranteed structurally.
+    // 20 races; Driver A always P1, Driver B always P2. Simulating from
+    // race 10 gives Driver A a real 10-0 Dirichlet posterior while leaving
+    // enough remaining points that clinch/elimination can't short-circuit
+    // it -- the result has to come from the real sample-then-rank RNG path.
+    // Unlike a pooled distribution, the Dirichlet prior keeps nonzero mass
+    // everywhere, so dominance is checked as "overwhelming", not exact 1.0.
     {
         std::ostringstream rows;
         for (int race = 1; race <= 20; ++race) {
@@ -1027,10 +1086,8 @@ void test_championship_clinch() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // Driver A wins races 1 and 2 outright (50 pts); Driver B scores 0 in
-    // both. Race 3 (Circuit Three) exists only so race_count() == 3 -- one
-    // race remains, worth at most 25 points, which can't close a 50-point
-    // gap. The leader has mathematically clinched before any simulation runs.
+    // Driver A leads by 50 pts after 2 races; only 25 pts remain (1 race),
+    // so the leader has mathematically clinched before any simulation runs.
     {
         std::ofstream f(results_path);
         f << R"([
@@ -1079,10 +1136,8 @@ void test_championship_elimination() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // After 2 races, Driver A and Driver B are tied for the lead at 43 pts
-    // each; Driver C has 0. One race remains (max 25 pts), so C's best
-    // possible total (25) can never reach 43 -- mathematically eliminated,
-    // even though the title fight between A and B is still wide open.
+    // A and B are tied at 43 pts; C has 0. Only 25 pts remain, so C is
+    // mathematically eliminated even though A vs B is still wide open.
     {
         std::ofstream f(results_path);
         f << R"([
