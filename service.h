@@ -9,14 +9,10 @@
 #include <optional>
 #include <string>
 
-// Owns the full prediction pipeline. MarkovEngine, StrategyReporter, and
-// ChampionshipSimulator each hold a const& into other members here
-// (transition counts, driver indices, the engine), so one owner must control
-// every lifetime. Members are declared in dependency order so reverse-order
-// destruction tears down simulator_/reporter_ before what they reference;
-// non-copyable/non-movable keeps those references from ever binding to a
-// different object. engine_/simulator_/reporter_ are optional because they
-// can't be built until trainer_ (and then engine_) has run.
+// Owns the prediction pipeline. MarkovEngine/StrategyReporter/
+// ChampionshipSimulator hold const& into other members, so declaration
+// order controls destruction and copy/move are disabled to protect those
+// references.
 class PitWallService {
 public:
     PitWallService();

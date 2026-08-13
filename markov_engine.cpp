@@ -62,8 +62,7 @@ std::map<int, double> MarkovEngine::predict_finish_distribution_for_driver(int g
         int lo = static_cast<int>(std::floor(target));
         int hi = static_cast<int>(std::ceil(target));
 
-        // frac_lo + frac_hi always sums to 1.0, including when target is an
-        // exact integer (lo == hi, frac_hi == 0.0, all mass goes to lo).
+        // frac_lo + frac_hi always sums to 1.0, so mass is never lost or gained.
         double frac_hi = target - lo;
         double frac_lo = 1.0 - frac_hi;
 

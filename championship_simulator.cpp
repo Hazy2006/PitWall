@@ -92,6 +92,7 @@ void ChampionshipSimulator::load_results(const std::string& results_json_path) {
         if (count_it == grid_count.end() || count_it->second == 0) {
             continue;  // never had a valid (non-pit-lane) grid slot
         }
+        // Full-season average grid position
         double mean = grid_sum.at(driver) / static_cast<double>(count_it->second);
         avg_grid_rounded_[driver] = static_cast<int>(std::lround(mean));
     }
@@ -121,11 +122,11 @@ std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulato
     for (const auto& driver : all_drivers_) {
         auto grid_it = avg_grid_rounded_.find(driver);
         if (grid_it == avg_grid_rounded_.end()) {
-            continue;  // no valid average grid -- skipped in every remaining race
+            continue;  
         }
         std::map<int, double> distribution = engine_.predict_finish_distribution(grid_it->second);
         if (distribution.empty()) {
-            continue;  // engine has no pooled data for this grid -- skipped
+            continue;  
         }
         samplers.emplace(driver, make_sampler(distribution));
     }
@@ -137,7 +138,7 @@ std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulato
     for (const auto& driver : all_drivers_) {
         std::map<int, double> distribution = dirichlet_model_.driver_finish_distribution(driver, from_race);
         if (distribution.empty()) {
-            continue;  // driver unknown to the Dirichlet model -- skipped in every remaining race
+            continue;  
         }
         samplers.emplace(driver, make_sampler(distribution));
     }
@@ -215,10 +216,9 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
                 sampled.emplace_back(driver, sampler.finishes[idx]);
             }
 
-            // Shuffle first, then a *stable* sort by sampled finish: ties in
-            // the sampled finish keep the shuffled (i.e. random) relative
-            // order instead of insertion order, which is how tie-breaking is
-            // randomized without violating strict-weak-ordering during sort.
+            // Shuffle, then stable-sort by finish: ties keep the shuffled
+            // (random) order instead of insertion order -- randomizes
+            // tie-breaks without violating strict-weak-ordering.
             std::shuffle(sampled.begin(), sampled.end(), rng_);
             std::stable_sort(sampled.begin(), sampled.end(),
                 [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
@@ -234,10 +234,8 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
         double best_points = -1.0;
         std::vector<std::string> leaders;
         for (const auto& [driver, pts] : sim_points) {
-            // Eliminated drivers are excluded from contention outright: it's
-            // mathematically impossible for one to actually have the best
-            // total here, but this guards against ever crediting one if it
-            // somehow did.
+            // Guards against ever crediting an eliminated driver, though it's
+            // mathematically impossible for one to hold the best total here.
             if (eliminated.count(driver) != 0) {
                 continue;
             }
