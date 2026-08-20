@@ -39,8 +39,6 @@ private:
 
     static DriverSampler make_sampler(const std::map<int, double>& distribution);
 
-    std::map<std::string, DriverSampler> build_avg_grid_samplers() const;
-
     // One sampler per driver from their Dirichlet-prior
     // finish distribution built from races [1, from_race] only.
     std::map<std::string, DriverSampler> build_bayesian_samplers(int from_race) const;

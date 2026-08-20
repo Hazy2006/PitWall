@@ -117,22 +117,6 @@ std::map<std::string, double> ChampionshipSimulator::points_through_race(int thr
     return points;
 }
 
-std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulator::build_avg_grid_samplers() const {
-    std::map<std::string, DriverSampler> samplers;
-    for (const auto& driver : all_drivers_) {
-        auto grid_it = avg_grid_rounded_.find(driver);
-        if (grid_it == avg_grid_rounded_.end()) {
-            continue;  
-        }
-        std::map<int, double> distribution = engine_.predict_finish_distribution(grid_it->second);
-        if (distribution.empty()) {
-            continue;  
-        }
-        samplers.emplace(driver, make_sampler(distribution));
-    }
-    return samplers;
-}
-
 std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulator::build_bayesian_samplers(int from_race) const {
     std::map<std::string, DriverSampler> samplers;
     for (const auto& driver : all_drivers_) {

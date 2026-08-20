@@ -1,4 +1,6 @@
 #include <iostream>
+#include <sstream>
+#include <string>
 
 void run_domain_tests();
 void run_edge_tests();
@@ -27,6 +29,9 @@ void test_championship_points_through_race();
 void test_championship_real();
 
 int main() {
+	std::ostringstream captured;
+	std::streambuf* real_cout = std::cout.rdbuf(captured.rdbuf());
+
 	std::cout << "=== Running PitWall Test Suite ===\n";
 	run_domain_tests();
 	std::cout << "==================================\n";
@@ -79,5 +84,10 @@ int main() {
 	test_championship_points_through_race();
 	std::cout << "==================================\n";
 	test_championship_real();
-	return 0;
+
+	std::cout.rdbuf(real_cout);
+	std::string output = captured.str();
+	std::cout << output;
+
+	return output.find("[FAIL]") != std::string::npos ? 1 : 0;
 }
