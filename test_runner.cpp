@@ -823,6 +823,58 @@ void test_strategy_reporter_real() {
     std::cout << "\nVerstappen, starting P1:\n  " << reporter.report_single(1, "Max Verstappen") << "\n";
 }
 
+void test_compare() {
+    std::cout << "--- Running Strategy Reporter Compare Test ---\n";
+    bool ok = true;
+
+    // Grid 3 pooled: finish 2 x6 (60%), finish 4 x4 (40%).
+    // Grid 6 pooled: finish 5 x1 (50%), finish 9 x1 (50%) -> expected 7.0.
+    std::map<int, std::map<int, int>> counts;
+    counts[3][2] = 6;
+    counts[3][4] = 4;
+    counts[6][5] = 1;
+    counts[6][9] = 1;
+    MarkovEngine engine(counts);
+
+    // Only "Fast Driver" has an index; "Slow Driver" is unindexed
+    // (fewer than 10 races), so it must fall back to the pooled distribution
+    // and report the honest no-adjustment note.
+    std::map<std::string, double> indices;
+    indices["Fast Driver"] = 1.0;  // exact integer shift: {2,4} -> {1,3}, expected 1.8
+
+    StrategyReporter reporter(engine, indices);
+
+    std::string report = reporter.compare(3, "Fast Driver", 6, "Slow Driver");
+
+    ok &= (report.find("Fast Driver") != std::string::npos);
+    ok &= (report.find("Slow Driver") != std::string::npos);
+    ok &= (report.find("P3") != std::string::npos);
+    ok &= (report.find("P6") != std::string::npos);
+
+    // Fast Driver: shifted expected finish = 1*0.6 + 3*0.4 = 1.8.
+    ok &= (report.find("P1.8") != std::string::npos);
+    // Slow Driver: pooled expected finish = 5*0.5 + 9*0.5 = 7.0.
+    ok &= (report.find("P7.0") != std::string::npos);
+
+    ok &= (report.find("favored") != std::string::npos);
+
+    // Slow Driver has no index -- must get the same honest fallback text as
+    // report_single, not a fabricated adjustment.
+    ok &= (report.find("No driver-specific adjustment is available for Slow Driver") != std::string::npos);
+    ok &= (report.find("fewer than 10 races") != std::string::npos);
+
+    // Fast Driver has an index -- must NOT get the no-adjustment note.
+    ok &= (report.find("No driver-specific adjustment is available for Fast Driver") == std::string::npos);
+
+    if (!ok) {
+        std::cout << "[FAIL] Compare output did not match expectations: " << report << "\n";
+    }
+    else {
+        std::cout << "[PASS] compare() reported both drivers' grids, expected finishes, an honest "
+                     "no-adjustment note, and a favored-driver statement.\n";
+    }
+}
+
 void test_dirichlet_finish_model() {
     std::cout << "--- Running Dirichlet Finish Model Test ---\n";
 

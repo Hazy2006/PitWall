@@ -28,6 +28,9 @@ public:
 
     std::string report(int grid_position, const std::string& driver_name) const;
 
+    // See StrategyReporter::compare.
+    std::string compare(int grid_a, const std::string& driver_a, int grid_b, const std::string& driver_b) const;
+
     // See ChampionshipSimulator::simulate_championship.
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 

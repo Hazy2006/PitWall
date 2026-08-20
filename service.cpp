@@ -46,6 +46,10 @@ std::string PitWallService::report(int grid_position, const std::string& driver_
     return reporter_->report_single(grid_position, driver_name);
 }
 
+std::string PitWallService::compare(int grid_a, const std::string& driver_a, int grid_b, const std::string& driver_b) const {
+    return reporter_->compare(grid_a, driver_a, grid_b, driver_b);
+}
+
 std::map<std::string, double> PitWallService::simulate_championship(int from_race, int num_simulations) const {
     return simulator_->simulate_championship(from_race, num_simulations);
 }

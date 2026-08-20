@@ -43,6 +43,22 @@ namespace {
         out << std::fixed << std::setprecision(1) << std::fabs(index);
         return out.str();
     }
+
+    // Probability-weighted average finishing position.
+    double expected_finish(const std::map<int, double>& dist) {
+        double expected = 0.0;
+        for (const auto& [finish, prob] : dist) {
+            expected += finish * prob;
+        }
+        return expected;
+    }
+
+    // Fixed value, rounded to 1 decimal, formatted without sign.
+    std::string finish_str(double value) {
+        std::ostringstream out;
+        out << std::fixed << std::setprecision(1) << value;
+        return out.str();
+    }
 }
 
 StrategyReporter::StrategyReporter(const MarkovEngine& engine, const std::map<std::string, double>& driver_indices)
@@ -102,6 +118,59 @@ std::string StrategyReporter::report_single(int grid_position, const std::string
     }
     else {
         out << ", with the likely finish remaining at P" << shifted_top << ".";
+    }
+
+    return out.str();
+}
+
+std::string StrategyReporter::compare(int grid_a, const std::string& driver_a, int grid_b, const std::string& driver_b) const {
+    std::map<int, double> pooled_a = engine.predict_finish_distribution(grid_a);
+    std::map<int, double> pooled_b = engine.predict_finish_distribution(grid_b);
+
+    if (pooled_a.empty() && pooled_b.empty()) {
+        return "No historical data is available for cars starting P" + std::to_string(grid_a)
+            + " or P" + std::to_string(grid_b) + ".";
+    }
+    if (pooled_a.empty()) {
+        return "No historical data is available for cars starting P" + std::to_string(grid_a) + ".";
+    }
+    if (pooled_b.empty()) {
+        return "No historical data is available for cars starting P" + std::to_string(grid_b) + ".";
+    }
+
+    auto it_a = driver_indices.find(driver_a);
+    auto it_b = driver_indices.find(driver_b);
+
+    std::map<int, double> dist_a = (it_a != driver_indices.end())
+        ? engine.predict_finish_distribution_for_driver(grid_a, it_a->second)
+        : pooled_a;
+    std::map<int, double> dist_b = (it_b != driver_indices.end())
+        ? engine.predict_finish_distribution_for_driver(grid_b, it_b->second)
+        : pooled_b;
+
+    double expected_a = expected_finish(dist_a);
+    double expected_b = expected_finish(dist_b);
+
+    std::ostringstream out;
+    out << driver_a << " starting P" << grid_a << ": expected finish P" << finish_str(expected_a) << ".";
+    if (it_a == driver_indices.end()) {
+        out << " No driver-specific adjustment is available for " << driver_a
+            << " (fewer than 10 races in the dataset).";
+    }
+
+    out << " " << driver_b << " starting P" << grid_b << ": expected finish P" << finish_str(expected_b) << ".";
+    if (it_b == driver_indices.end()) {
+        out << " No driver-specific adjustment is available for " << driver_b
+            << " (fewer than 10 races in the dataset).";
+    }
+
+    // Lower expected finish is better; a tie favors driver_a deterministically.
+    double margin = std::fabs(expected_b - expected_a);
+    if (expected_a <= expected_b) {
+        out << " " << driver_a << " is favored to finish ahead by approximately " << finish_str(margin) << " positions.";
+    }
+    else {
+        out << " " << driver_b << " is favored to finish ahead by approximately " << finish_str(margin) << " positions.";
     }
 
     return out.str();

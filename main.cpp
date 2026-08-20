@@ -31,6 +31,9 @@ int main() {
 	std::cout << service.report(1, "Max Verstappen") << "\n";
 	std::cout << service.report(10, "Oliver Bearman") << "\n";
 
+	std::cout << "\n-- Driver comparison --\n\n";
+	std::cout << service.compare(3, "Charles Leclerc", 5, "Lando Norris") << "\n";
+
 	print_title_odds("Title odds after race 5", service.simulate_championship(5, 10000));
 	print_title_odds("Title odds after race 10", service.simulate_championship(10, 10000));
 	print_title_odds("Title odds after race 15", service.simulate_championship(15, 10000));
