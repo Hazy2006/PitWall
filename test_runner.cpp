@@ -8,6 +8,7 @@
 #include "service.h"
 #include "championship_simulator.h"
 #include "dirichlet_finish_model.h"
+#include "path_utils.h"
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -371,10 +372,10 @@ void test_real_import() {
     Graph g;
     DataImporter importer(g);
 
-    importer.import_drivers("data/drivers.json");
-    importer.import_teams("data/teams.json");
-    importer.import_circuits("data/circuits.json");
-    importer.import_results("data/results.json");
+    importer.import_drivers(resolve_repo_path("data/drivers.json"));
+    importer.import_teams(resolve_repo_path("data/teams.json"));
+    importer.import_circuits(resolve_repo_path("data/circuits.json"));
+    importer.import_results(resolve_repo_path("data/results.json"));
 
     std::cout << "Total nodes: " << g.count_vertices() << "\n";
     std::cout << "Total edges: " << g.count_edges() << "\n";
@@ -504,7 +505,7 @@ void test_markov_real() {
     std::cout << "--- Running Real Data MarkovTrainer Smoke Test ---\n";
 
     MarkovTrainer trainer;
-    trainer.train("data/results.json");
+    trainer.train(resolve_repo_path("data/results.json"));
 
     std::cout << "Total observations: " << trainer.total_observations() << "\n";
 
@@ -671,8 +672,8 @@ void test_driver_index_real() {
     std::cout << "--- Running Real Data Driver Index Smoke Test ---\n";
 
     MarkovTrainer trainer;
-    trainer.train("data/results.json");
-    std::map<std::string, double> indices = trainer.compute_driver_indices("data/results.json");
+    trainer.train(resolve_repo_path("data/results.json"));
+    std::map<std::string, double> indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
 
     std::vector<std::pair<std::string, double>> sorted_indices(indices.begin(), indices.end());
     std::sort(sorted_indices.begin(), sorted_indices.end(),
@@ -798,8 +799,8 @@ void test_strategy_reporter_real() {
     std::cout << "--- Running Real Data Strategy Reporter Smoke Test ---\n";
 
     MarkovTrainer trainer;
-    trainer.train("data/results.json");
-    std::map<std::string, double> indices = trainer.compute_driver_indices("data/results.json");
+    trainer.train(resolve_repo_path("data/results.json"));
+    std::map<std::string, double> indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
     MarkovEngine engine(trainer.get_counts());
     StrategyReporter reporter(engine, indices);
 
@@ -1292,9 +1293,9 @@ void test_championship_real() {
     std::cout << "--- Running Real Data Championship Simulator Smoke Test ---\n";
 
     MarkovTrainer trainer;
-    trainer.train("data/results.json");
+    trainer.train(resolve_repo_path("data/results.json"));
     MarkovEngine engine(trainer.get_counts());
-    ChampionshipSimulator sim(engine, "data/results.json", /*seed=*/42);
+    ChampionshipSimulator sim(engine, resolve_repo_path("data/results.json"), /*seed=*/42);
 
     auto print_top8 = [](const std::string& label, const std::map<std::string, double>& probs) {
         std::vector<std::pair<std::string, double>> sorted(probs.begin(), probs.end());

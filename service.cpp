@@ -1,12 +1,14 @@
 #include "service.h"
 #include "node.h"
+#include "path_utils.h"
 #include <memory>
 
 PitWallService::PitWallService() : importer_(graph_) {}
 
 void PitWallService::load(const std::string& data_dir) {
-    importData(data_dir);
-    trainModel(data_dir);
+    std::string resolved_dir = resolve_repo_path(data_dir);
+    importData(resolved_dir);
+    trainModel(resolved_dir);
     applyIndices();
     buildReporter();
 }
