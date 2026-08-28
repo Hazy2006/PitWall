@@ -179,5 +179,5 @@ data/
 - [x] Driver performance adjustment
 - [x] Natural-language prediction reports
 - [x] Championship Monte Carlo simulator
-- [ ] Driver vs. Driver comparison reports
-- [ ] Lap-level race simulation
+- [x] Driver vs. Driver comparison reports
+- [x] Lap-level race simulation
