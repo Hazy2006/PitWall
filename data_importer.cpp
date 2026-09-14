@@ -1,24 +1,11 @@
 #include "data_importer.h"
 #include "node.h"
+#include "json_utils.h"
 #include <nlohmann/json.hpp>
-#include <fstream>
-#include <stdexcept>
 #include <map>
 #include <utility>
 
 using json = nlohmann::json;
-
-namespace {
-    json load_json_array(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            throw std::runtime_error("Cannot open file: " + path);
-        }
-        json data;
-        file >> data;
-        return data;
-    }
-}
 
 DataImporter::DataImporter(Graph& graph_ref) : graph(graph_ref) {}
 

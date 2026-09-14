@@ -163,6 +163,7 @@
     <ClInclude Include="..\championship_simulator.h" />
     <ClInclude Include="..\dirichlet_finish_model.h" />
     <ClInclude Include="..\path_utils.h" />
+    <ClInclude Include="..\json_utils.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
@@ -178,6 +179,7 @@
     <ClCompile Include="..\championship_simulator.cpp" />
     <ClCompile Include="..\dirichlet_finish_model.cpp" />
     <ClCompile Include="..\path_utils.cpp" />
+    <ClCompile Include="..\json_utils.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

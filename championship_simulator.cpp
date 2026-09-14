@@ -1,6 +1,6 @@
 #include "championship_simulator.h"
+#include "json_utils.h"
 #include <nlohmann/json.hpp>
-#include <fstream>
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
@@ -9,16 +9,6 @@
 using json = nlohmann::json;
 
 namespace {
-    json load_json_array(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            throw std::runtime_error("Cannot open file: " + path);
-        }
-        json data;
-        file >> data;
-        return data;
-    }
-
     double points_for_position(int position) {
         static const std::map<int, double> table = {
             {1, 25.0}, {2, 18.0}, {3, 15.0}, {4, 12.0}, {5, 10.0},
@@ -41,10 +31,9 @@ ChampionshipSimulator::DriverSampler ChampionshipSimulator::make_sampler(const s
     return sampler;
 }
 
-ChampionshipSimulator::ChampionshipSimulator(const MarkovEngine& engine,
-                                              const std::string& results_json_path,
+ChampionshipSimulator::ChampionshipSimulator(const std::string& results_json_path,
                                               unsigned int seed)
-    : engine_(engine), dirichlet_model_(results_json_path), rng_(seed) {
+    : dirichlet_model_(results_json_path), rng_(seed) {
     load_results(results_json_path);
 }
 
@@ -53,8 +42,6 @@ void ChampionshipSimulator::load_results(const std::string& results_json_path) {
 
     std::map<std::string, int> race_index_by_circuit;
     std::set<std::string> seen_drivers;
-    std::map<std::string, double> grid_sum;
-    std::map<std::string, int> grid_count;
 
     for (const auto& entry : data) {
         RaceResult r;
@@ -72,11 +59,6 @@ void ChampionshipSimulator::load_results(const std::string& results_json_path) {
         if (seen_drivers.insert(r.driver_name).second) {
             all_drivers_.push_back(r.driver_name);
         }
-
-        if (r.grid != 0) {
-            grid_sum[r.driver_name] += r.grid;
-            grid_count[r.driver_name] += 1;
-        }
     }
 
     // Second pass, after results_ has stopped growing: races_ stores pointers
@@ -85,16 +67,6 @@ void ChampionshipSimulator::load_results(const std::string& results_json_path) {
     for (const auto& r : results_) {
         int race_index = race_index_by_circuit.at(r.circuit_name);
         races_[race_index].push_back(&r);
-    }
-
-    for (const auto& driver : all_drivers_) {
-        auto count_it = grid_count.find(driver);
-        if (count_it == grid_count.end() || count_it->second == 0) {
-            continue;  // never had a valid (non-pit-lane) grid slot
-        }
-        // Full-season average grid position
-        double mean = grid_sum.at(driver) / static_cast<double>(count_it->second);
-        avg_grid_rounded_[driver] = static_cast<int>(std::lround(mean));
     }
 }
 
@@ -122,7 +94,7 @@ std::map<std::string, ChampionshipSimulator::DriverSampler> ChampionshipSimulato
     for (const auto& driver : all_drivers_) {
         std::map<int, double> distribution = dirichlet_model_.driver_finish_distribution(driver, from_race);
         if (distribution.empty()) {
-            continue;  
+            continue;
         }
         samplers.emplace(driver, make_sampler(distribution));
     }
@@ -182,67 +154,90 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
     // Built once per call, not once per simulated race: each driver's finish
     // distribution (Dirichlet posterior through from_race) never changes
     // across the remaining races being simulated.
-    std::map<std::string, DriverSampler> samplers = build_bayesian_samplers(from_race);
+    std::map<std::string, DriverSampler> named_samplers = build_bayesian_samplers(from_race);
 
-    std::map<std::string, double> win_credit;
-    for (const auto& driver : all_drivers_) {
-        win_credit[driver] = 0.0;
+    // Flatten the name-keyed samplers into parallel index-aligned vectors so
+    // the num_simulations x remaining_races inner loop below never has to
+    // allocate or compare through a string-keyed container -- driver identity
+    // is only needed once more, when the per-index win credit is written back
+    // into the returned name-keyed result.
+    size_t n = named_samplers.size();
+    std::vector<std::string> sim_drivers;
+    std::vector<DriverSampler> samplers;
+    std::vector<double> sim_points_base;
+    std::vector<char> is_eliminated;
+    sim_drivers.reserve(n);
+    samplers.reserve(n);
+    sim_points_base.reserve(n);
+    is_eliminated.reserve(n);
+
+    for (auto& [driver, sampler] : named_samplers) {
+        sim_drivers.push_back(driver);
+        samplers.push_back(std::move(sampler));
+        sim_points_base.push_back(starting_points.at(driver));
+        is_eliminated.push_back(eliminated.count(driver) != 0);
     }
 
+    std::vector<double> win_credit(n, 0.0);
+    std::vector<double> sim_points(n);
+    std::vector<int> finish_order(n);
+
     for (int sim = 0; sim < num_simulations; ++sim) {
-        std::map<std::string, double> sim_points = starting_points;
+        sim_points = sim_points_base;
 
         for (int race = from_race; race < total_races; ++race) {
-            std::vector<std::pair<std::string, int>> sampled;
-            sampled.reserve(samplers.size());
-            for (auto& [driver, sampler] : samplers) {
-                int idx = sampler.dist(rng_);
-                sampled.emplace_back(driver, sampler.finishes[idx]);
+            std::vector<int> sampled_finish(n);
+            for (size_t i = 0; i < n; ++i) {
+                int idx = samplers[i].dist(rng_);
+                sampled_finish[i] = samplers[i].finishes[idx];
             }
 
             // Shuffle, then stable-sort by finish: ties keep the shuffled
             // (random) order instead of insertion order -- randomizes
             // tie-breaks without violating strict-weak-ordering.
-            std::shuffle(sampled.begin(), sampled.end(), rng_);
-            std::stable_sort(sampled.begin(), sampled.end(),
-                [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
-                    return a.second < b.second;
+            for (size_t i = 0; i < n; ++i) {
+                finish_order[i] = static_cast<int>(i);
+            }
+            std::shuffle(finish_order.begin(), finish_order.end(), rng_);
+            std::stable_sort(finish_order.begin(), finish_order.end(),
+                [&sampled_finish](int a, int b) {
+                    return sampled_finish[a] < sampled_finish[b];
                 });
 
-            for (size_t i = 0; i < sampled.size(); ++i) {
-                int assigned_position = static_cast<int>(i) + 1;
-                sim_points[sampled[i].first] += points_for_position(assigned_position);
+            for (size_t pos = 0; pos < finish_order.size(); ++pos) {
+                int assigned_position = static_cast<int>(pos) + 1;
+                sim_points[finish_order[pos]] += points_for_position(assigned_position);
             }
         }
 
         double best_points = -1.0;
-        std::vector<std::string> leaders;
-        for (const auto& [driver, pts] : sim_points) {
+        std::vector<size_t> leaders;
+        for (size_t i = 0; i < n; ++i) {
             // Guards against ever crediting an eliminated driver, though it's
             // mathematically impossible for one to hold the best total here.
-            if (eliminated.count(driver) != 0) {
+            if (is_eliminated[i]) {
                 continue;
             }
-            if (pts > best_points) {
-                best_points = pts;
+            if (sim_points[i] > best_points) {
+                best_points = sim_points[i];
                 leaders.clear();
-                leaders.push_back(driver);
+                leaders.push_back(i);
             }
-            else if (pts == best_points) {
-                leaders.push_back(driver);
+            else if (sim_points[i] == best_points) {
+                leaders.push_back(i);
             }
         }
 
         // An exact tie for the season lead splits this simulation's win
         // credit evenly, so the returned fractions always sum to 1.0.
         double credit = 1.0 / static_cast<double>(leaders.size());
-        for (const auto& driver : leaders) {
-            win_credit[driver] += credit;
+        for (size_t i : leaders) {
+            win_credit[i] += credit;
         }
     }
 
-    for (const auto& driver : all_drivers_) {
-        result[driver] = win_credit[driver] / static_cast<double>(num_simulations);
+    for (size_t i = 0; i < n; ++i) {
+        result[sim_drivers[i]] = win_credit[i] / static_cast<double>(num_simulations);
     }
     return result;
 }

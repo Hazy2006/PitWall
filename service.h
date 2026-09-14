@@ -34,6 +34,8 @@ public:
     // See ChampionshipSimulator::simulate_championship.
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 
+    int race_count() const;
+
 private:
     void importData(const std::string& data_dir);
     void trainModel(const std::string& data_dir);

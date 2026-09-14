@@ -1,16 +1,22 @@
 """
-Fetches 2024 F1 season data from the Jolpica-F1 API (the Ergast replacement)
+Fetches F1 season data from the Jolpica-F1 API (the Ergast replacement)
 and writes it into the flat JSON files the C++ DataImporter expects.
 
 Stdlib only - no pip install required.
+
+Usage:
+    python scripts/fetch_f1_data.py                     # 2024 season -> data/
+    python scripts/fetch_f1_data.py --season 2012        # 2012 season -> data_2012/
+    python scripts/fetch_f1_data.py --season 2012 --out data_2012
 """
+import argparse
 import json
 import os
 import urllib.request
 import urllib.error
 
 BASE_URL = "https://api.jolpi.ca/ergast/f1"
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 REQUEST_HEADERS = {
     "User-Agent": "PitWall-DataFetcher/1.0",
@@ -34,8 +40,8 @@ def to_number(value, default=0):
         return default
 
 
-def fetch_drivers():
-    data = fetch_json(f"{BASE_URL}/2024/drivers.json")
+def fetch_drivers(season):
+    data = fetch_json(f"{BASE_URL}/{season}/drivers.json")
     drivers = data["MRData"]["DriverTable"]["Drivers"]
     result = []
     for d in drivers:
@@ -48,8 +54,8 @@ def fetch_drivers():
     return result
 
 
-def fetch_teams():
-    data = fetch_json(f"{BASE_URL}/2024/constructors.json")
+def fetch_teams(season):
+    data = fetch_json(f"{BASE_URL}/{season}/constructors.json")
     constructors = data["MRData"]["ConstructorTable"]["Constructors"]
     result = []
     for c in constructors:
@@ -60,8 +66,8 @@ def fetch_teams():
     return result
 
 
-def fetch_circuits():
-    data = fetch_json(f"{BASE_URL}/2024/circuits.json")
+def fetch_circuits(season):
+    data = fetch_json(f"{BASE_URL}/{season}/circuits.json")
     circuits = data["MRData"]["CircuitTable"]["Circuits"]
     result = []
     for c in circuits:
@@ -72,14 +78,14 @@ def fetch_circuits():
     return result
 
 
-def fetch_results():
+def fetch_results(season):
     # The API silently caps `limit` at 100 per request, so we must page
     # through with `offset` until we've collected everything.
     result = []
     offset = 0
     limit = 100
     while True:
-        data = fetch_json(f"{BASE_URL}/2024/results.json?limit={limit}&offset={offset}")
+        data = fetch_json(f"{BASE_URL}/{season}/results.json?limit={limit}&offset={offset}")
         mrdata = data["MRData"]
         for race in mrdata["RaceTable"]["Races"]:
             circuit_name = race.get("Circuit", {}).get("circuitName", "")
@@ -101,26 +107,36 @@ def fetch_results():
     return result
 
 
-def write_json(filename, payload):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    path = os.path.join(DATA_DIR, filename)
+def write_json(data_dir, filename, payload):
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, filename)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
 
 def main():
-    drivers = fetch_drivers()
-    write_json("drivers.json", drivers)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--season", default="2024", help="F1 season year to fetch (default: 2024)")
+    parser.add_argument("--out", default=None, help="Output directory, relative to repo root (default: 'data' for 2024, 'data_<season>' otherwise)")
+    args = parser.parse_args()
 
-    teams = fetch_teams()
-    write_json("teams.json", teams)
+    season = args.season
+    out_name = args.out or ("data" if season == "2024" else f"data_{season}")
+    data_dir = os.path.join(REPO_ROOT, out_name)
 
-    circuits = fetch_circuits()
-    write_json("circuits.json", circuits)
+    drivers = fetch_drivers(season)
+    write_json(data_dir, "drivers.json", drivers)
 
-    results = fetch_results()
-    write_json("results.json", results)
+    teams = fetch_teams(season)
+    write_json(data_dir, "teams.json", teams)
 
+    circuits = fetch_circuits(season)
+    write_json(data_dir, "circuits.json", circuits)
+
+    results = fetch_results(season)
+    write_json(data_dir, "results.json", results)
+
+    print(f"Season {season} -> {data_dir}")
     print(f"Fetched {len(drivers)} drivers, {len(teams)} teams, "
           f"{len(circuits)} circuits, {len(results)} race results.")
 

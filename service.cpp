@@ -24,7 +24,7 @@ void PitWallService::trainModel(const std::string& data_dir) {
     trainer_.train(data_dir + "/results.json");
     driver_indices_ = trainer_.compute_driver_indices(data_dir + "/results.json");
     engine_.emplace(trainer_.get_counts());
-    simulator_.emplace(*engine_, data_dir + "/results.json");
+    simulator_.emplace(data_dir + "/results.json");
 }
 
 void PitWallService::applyIndices() {
@@ -54,4 +54,8 @@ std::string PitWallService::compare(int grid_a, const std::string& driver_a, int
 
 std::map<std::string, double> PitWallService::simulate_championship(int from_race, int num_simulations) const {
     return simulator_->simulate_championship(from_race, num_simulations);
+}
+
+int PitWallService::race_count() const {
+    return simulator_->race_count();
 }

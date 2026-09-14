@@ -1,23 +1,12 @@
 #include "dirichlet_finish_model.h"
+#include "json_utils.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <stdexcept>
 
 using json = nlohmann::json;
 
 namespace {
-    json load_json_array(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            throw std::runtime_error("Cannot open file: " + path);
-        }
-        json data;
-        file >> data;
-        return data;
-    }
-
     // Exponential recency decay applied to evidence: a race k races before
     // the cutoff contributes lambda^k instead of a flat 1.0. 0.85 balances
     // responsiveness to recent form against overreacting to a single race;

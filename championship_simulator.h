@@ -1,5 +1,4 @@
 #pragma once
-#include "markov_engine.h"
 #include "dirichlet_finish_model.h"
 #include <map>
 #include <string>
@@ -8,8 +7,7 @@
 
 class ChampionshipSimulator {
 public:
-    ChampionshipSimulator(const MarkovEngine& engine,
-                          const std::string& results_json_path,
+    ChampionshipSimulator(const std::string& results_json_path,
                           unsigned int seed = 42);
 
     int race_count() const;
@@ -31,8 +29,8 @@ private:
     };
 
     struct DriverSampler {
-        std::vector<int> finishes;             
-        std::discrete_distribution<int> dist; 
+        std::vector<int> finishes;
+        std::discrete_distribution<int> dist;
     };
 
     void load_results(const std::string& results_json_path);
@@ -43,12 +41,10 @@ private:
     // finish distribution built from races [1, from_race] only.
     std::map<std::string, DriverSampler> build_bayesian_samplers(int from_race) const;
 
-    const MarkovEngine& engine_;
     DirichletFinishModel dirichlet_model_;
     std::vector<RaceResult> results_;
-    std::vector<std::string> race_order_;               
-    std::vector<std::vector<const RaceResult*>> races_;   
-    std::vector<std::string> all_drivers_;               
-    std::map<std::string, int> avg_grid_rounded_;         
+    std::vector<std::string> race_order_;
+    std::vector<std::vector<const RaceResult*>> races_;
+    std::vector<std::string> all_drivers_;
     mutable std::mt19937 rng_;
 };

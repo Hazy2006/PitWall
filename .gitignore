@@ -15,6 +15,7 @@ vcpkg_installed/
 
 # Generated F1 data (fetched by scripts/fetch_f1_data.py, not source)
 data/
+data_*/
 
 # Generated inspection database
 *.db

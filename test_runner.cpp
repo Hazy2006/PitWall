@@ -1093,14 +1093,11 @@ void test_championship_simulator() {
         f << "[" << rows.str() << "]";
     }
 
-    std::map<int, std::map<int, int>> counts;  // unused: the default path no longer consults the engine
-    MarkovEngine engine(counts);
-
     const double epsilon = 1e-9;
     bool ok = true;
 
     const unsigned int seed = 12345;
-    ChampionshipSimulator sim1(engine, results_path.string(), seed);
+    ChampionshipSimulator sim1(results_path.string(), seed);
     std::map<std::string, double> probs = sim1.simulate_championship(10, 1000);
 
     ok &= (probs.size() == 2);
@@ -1115,7 +1112,7 @@ void test_championship_simulator() {
 
     // Determinism: a fresh simulator built from the same data and the same
     // seed must reproduce the exact same result.
-    ChampionshipSimulator sim2(engine, results_path.string(), seed);
+    ChampionshipSimulator sim2(results_path.string(), seed);
     std::map<std::string, double> probs_repeat = sim2.simulate_championship(10, 1000);
     ok &= (probs_repeat == probs);
 
@@ -1153,16 +1150,13 @@ void test_championship_clinch() {
         ])";
     }
 
-    std::map<int, std::map<int, int>> counts;  // unused: the clinch check returns before touching the engine
-    MarkovEngine engine(counts);
-
     const double epsilon = 1e-9;
     bool ok = true;
 
     // Two different seeds: if the result depends on the seed at all, the
     // clinch constraint isn't actually short-circuiting the RNG.
-    ChampionshipSimulator sim_a(engine, results_path.string(), /*seed=*/1);
-    ChampionshipSimulator sim_b(engine, results_path.string(), /*seed=*/999);
+    ChampionshipSimulator sim_a(results_path.string(), /*seed=*/1);
+    ChampionshipSimulator sim_b(results_path.string(), /*seed=*/999);
 
     std::map<std::string, double> probs_a = sim_a.simulate_championship(2, 1000);
     std::map<std::string, double> probs_b = sim_b.simulate_championship(2, 1000);
@@ -1206,13 +1200,7 @@ void test_championship_elimination() {
         ])";
     }
 
-    std::map<int, std::map<int, int>> counts;
-    counts[1][1] = 1; counts[1][2] = 1;  // grid 1 (Driver A) -> P1 or P2, 50/50
-    counts[2][1] = 1; counts[2][2] = 1;  // grid 2 (Driver B) -> P1 or P2, 50/50
-    counts[3][1] = 1;                    // grid 3 (Driver C) -> always P1 (best case; still not enough)
-    MarkovEngine engine(counts);
-
-    ChampionshipSimulator sim(engine, results_path.string(), /*seed=*/7);
+    ChampionshipSimulator sim(results_path.string(), /*seed=*/7);
     std::map<std::string, double> probs = sim.simulate_championship(2, 1000);
 
     const double epsilon = 1e-9;
@@ -1260,9 +1248,7 @@ void test_championship_points_through_race() {
         ])";
     }
 
-    std::map<int, std::map<int, int>> counts;  // unused by this test, engine still required to construct
-    MarkovEngine engine(counts);
-    ChampionshipSimulator sim(engine, results_path.string());
+    ChampionshipSimulator sim(results_path.string());
 
     bool ok = true;
     ok &= (sim.race_count() == 2);
@@ -1292,10 +1278,7 @@ void test_championship_points_through_race() {
 void test_championship_real() {
     std::cout << "--- Running Real Data Championship Simulator Smoke Test ---\n";
 
-    MarkovTrainer trainer;
-    trainer.train(resolve_repo_path("data/results.json"));
-    MarkovEngine engine(trainer.get_counts());
-    ChampionshipSimulator sim(engine, resolve_repo_path("data/results.json"), /*seed=*/42);
+    ChampionshipSimulator sim(resolve_repo_path("data/results.json"), /*seed=*/42);
 
     auto print_top8 = [](const std::string& label, const std::map<std::string, double>& probs) {
         std::vector<std::pair<std::string, double>> sorted(probs.begin(), probs.end());
