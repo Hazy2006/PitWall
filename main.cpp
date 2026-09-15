@@ -32,8 +32,8 @@ namespace {
 	const DemoSeason& season_2024() {
 		static const DemoSeason s{
 			"data", "2024",
-			{ {3, "Charles Leclerc"}, {1, "Max Verstappen"}, {10, "Oliver Bearman"}, {7, "Lewis Hamilton"} },
-			{1, "Max Verstappen"}, {1, "Lewis Hamilton"}
+			{ {3, "Charles Leclerc"}, {1, "Max Verstappen"}, {10, "Oliver Bearman"} },
+			{3, "Charles Leclerc"}, {5, "Lando Norris"}
 		};
 		return s;
 	}
