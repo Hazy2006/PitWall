@@ -3,10 +3,10 @@
 
 class MarkovEngine {
 private:
-    const std::map<int, std::map<int, int>>& counts;
+    const std::map<int, std::map<int, double>>& counts;
 
 public:
-    explicit MarkovEngine(const std::map<int, std::map<int, int>>& transition_counts);
+    explicit MarkovEngine(const std::map<int, std::map<int, double>>& transition_counts);
 
     std::map<int, double> predict_finish_distribution(int grid_position) const;
     int most_likely_finish(int grid_position) const;

@@ -5,6 +5,7 @@
 #include "markov_trainer.h"
 #include "markov_engine.h"
 #include "strategy_reporter.h"
+#include "driver_adjustment.h"
 #include "service.h"
 #include "championship_simulator.h"
 #include "dirichlet_finish_model.h"
@@ -452,10 +453,68 @@ void test_markov_trainer() {
     }
 }
 
+void test_markov_recency_weighting() {
+    std::cout << "--- Running MarkovTrainer Recency Weighting Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_markov_recency_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // 4 races, all starting from grid 5: an old finish (P8, race 1) and a
+    // recent finish (P2, race 4) at the same grid slot. Equal weighting
+    // would treat them identically; recency weighting must not.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver Q", "circuit_name": "Circuit One", "position": 8, "grid": 5, "team_name": "Team One"},
+            {"driver_name": "Driver R", "circuit_name": "Circuit Two", "position": 6, "grid": 5, "team_name": "Team One"},
+            {"driver_name": "Driver S", "circuit_name": "Circuit Three", "position": 4, "grid": 5, "team_name": "Team One"},
+            {"driver_name": "Driver T", "circuit_name": "Circuit Four", "position": 2, "grid": 5, "team_name": "Team One"}
+        ])";
+    }
+
+    MarkovTrainer trainer;
+    trainer.train(results_path.string());
+    fs::remove_all(temp_dir);
+
+    const auto& counts = trainer.get_counts();
+    const double epsilon = 1e-9;
+    const double lambda = 0.85;
+    bool ok = true;
+
+    // Anchored to the most recent race (race 4, k=0): race 1 (P8) is k=3
+    // races back, race 2 (P6) is k=2, race 3 (P4) is k=1, race 4 (P2) is k=0.
+    ok &= (counts.count(5) == 1);
+    const auto& row = counts.at(5);
+    ok &= (row.count(8) == 1) && (std::fabs(row.at(8) - std::pow(lambda, 3)) < epsilon);
+    ok &= (row.count(6) == 1) && (std::fabs(row.at(6) - std::pow(lambda, 2)) < epsilon);
+    ok &= (row.count(4) == 1) && (std::fabs(row.at(4) - std::pow(lambda, 1)) < epsilon);
+    ok &= (row.count(2) == 1) && (std::fabs(row.at(2) - std::pow(lambda, 0)) < epsilon);
+
+    // The most recent finish must carry more weight than the oldest one,
+    // even though both are single observations.
+    ok &= (row.at(2) > row.at(8));
+
+    // Feeding the weighted table into MarkovEngine should make the most
+    // recent finish the plurality favorite from that grid slot, not
+    // whichever finish happens to sort first.
+    MarkovEngine engine(counts);
+    ok &= (engine.most_likely_finish(5) == 2);
+
+    if (ok) {
+        std::cout << "[PASS] MarkovTrainer weighted transition counts by recency (lambda=0.85), anchored to the "
+                     "most recent race, and let a recent finish outweigh an older one at the same grid slot.\n";
+    }
+    else {
+        std::cout << "[FAIL] MarkovTrainer recency weighting did not match expectations.\n";
+    }
+}
+
 void test_markov_engine() {
     std::cout << "--- Running MarkovEngine Test ---\n";
 
-    std::map<int, std::map<int, int>> counts;
+    std::map<int, std::map<int, double>> counts;
     // grid 1: finish 1 x3, finish 2 x1  (total 4)
     counts[1][1] = 3;
     counts[1][2] = 1;
@@ -577,10 +636,94 @@ void test_driver_index() {
     }
 }
 
+void test_compute_team_indices() {
+    std::cout << "--- Running Team Performance Index Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_team_index_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    {
+        std::ostringstream rows;
+        // Team One: 10 valid rows total, split across two drivers, all at
+        // (grid - finish) = 2 -> mean 2.0, meets the 10-row threshold.
+        for (int i = 0; i < 5; ++i) {
+            rows << R"({"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 3, "grid": 5, "team_name": "Team One"},)";
+        }
+        for (int i = 0; i < 5; ++i) {
+            rows << R"({"driver_name": "Driver B", "circuit_name": "Circuit Two", "position": 3, "grid": 5, "team_name": "Team One"},)";
+        }
+        // Team Two: only 3 valid rows -> below threshold -> omitted.
+        rows << R"({"driver_name": "Driver C", "circuit_name": "Circuit One", "position": 6, "grid": 4, "team_name": "Team Two"},)";
+        rows << R"({"driver_name": "Driver C", "circuit_name": "Circuit Two", "position": 5, "grid": 4, "team_name": "Team Two"},)";
+        rows << R"({"driver_name": "Driver C", "circuit_name": "Circuit Three", "position": 4, "grid": 4, "team_name": "Team Two"})";
+
+        std::ofstream f(results_path);
+        f << "[" << rows.str() << "]";
+    }
+
+    MarkovTrainer trainer;
+    std::map<std::string, double> team_indices = trainer.compute_team_indices(results_path.string());
+
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    bool ok = true;
+
+    ok &= (team_indices.count("Team One") == 1);
+    ok &= (std::fabs(team_indices.at("Team One") - 2.0) < epsilon);
+    ok &= (team_indices.count("Team Two") == 0);
+    ok &= (team_indices.size() == 1);
+
+    if (ok) {
+        std::cout << "[PASS] compute_team_indices pooled both drivers into one mean and enforced the row threshold.\n";
+    }
+    else {
+        std::cout << "[FAIL] compute_team_indices output did not match expectations.\n";
+    }
+}
+
+void test_compute_driver_teams() {
+    std::cout << "--- Running Driver-Team Lookup Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_driver_teams_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Driver M starts at Team Old, then moves to Team New mid-season --
+    // the most recent (later in file order) team must win.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver M", "circuit_name": "Circuit One", "position": 5, "grid": 5, "team_name": "Team Old"},
+            {"driver_name": "Driver N", "circuit_name": "Circuit One", "position": 6, "grid": 6, "team_name": "Team Stable"},
+            {"driver_name": "Driver M", "circuit_name": "Circuit Two", "position": 3, "grid": 3, "team_name": "Team New"}
+        ])";
+    }
+
+    MarkovTrainer trainer;
+    std::map<std::string, std::string> driver_teams = trainer.compute_driver_teams(results_path.string());
+
+    fs::remove_all(temp_dir);
+
+    bool ok = true;
+    ok &= (driver_teams.count("Driver M") == 1) && (driver_teams.at("Driver M") == "Team New");
+    ok &= (driver_teams.count("Driver N") == 1) && (driver_teams.at("Driver N") == "Team Stable");
+
+    if (ok) {
+        std::cout << "[PASS] compute_driver_teams resolved a mid-season team change to the most recent team.\n";
+    }
+    else {
+        std::cout << "[FAIL] compute_driver_teams output did not match expectations.\n";
+    }
+}
+
 void test_driver_aware_prediction() {
     std::cout << "--- Running Driver-Aware Prediction Test ---\n";
 
-    std::map<int, std::map<int, int>> counts;
+    std::map<int, std::map<int, double>> counts;
     // grid 1: finish 1 x2, finish 2 x2, finish 3 x4 (total 8)
     counts[1][1] = 2;
     counts[1][2] = 2;
@@ -618,7 +761,7 @@ void test_driver_aware_prediction() {
     ok &= unseen.empty();
 
     // --- Fractional shift with mass interpolation ---
-    std::map<int, std::map<int, int>> counts2;
+    std::map<int, std::map<int, double>> counts2;
     counts2[5][2] = 2;
     counts2[5][5] = 3;
     counts2[5][8] = 5;
@@ -733,14 +876,15 @@ void test_strategy_reporter() {
     bool ok = true;
 
     // Pooled grid 5: finish 4 x5 (50%), finish 6 x3 (30%), finish 8 x2 (20%), total 10.
-    std::map<int, std::map<int, int>> counts;
+    std::map<int, std::map<int, double>> counts;
     counts[5][4] = 5;
     counts[5][6] = 3;
     counts[5][8] = 2;
     MarkovEngine engine(counts);
 
-    std::map<std::string, double> indices;
-    indices["Test Driver"] = 1.85; // rounds to 1.9
+    std::map<std::string, DriverAdjustment> indices;
+    indices["Test Driver"] = { 1.85, false }; // rounds to 1.9, own data
+    indices["Rookie Driver"] = { 1.85, true }; // same shift, but via team fallback
 
     StrategyReporter reporter(engine, indices);
 
@@ -779,6 +923,21 @@ void test_strategy_reporter() {
         std::cout << "[FAIL] Unindexed-driver report was not honest about missing data: " << unindexed_report << "\n";
     }
 
+    // --- Team-fallback driver: same shift math as an own-data driver, but
+    // labeled as coming from the team, not fabricated as personal form ---
+    std::string fallback_report = reporter.report_single(5, "Rookie Driver");
+    bool fallback_ok = true;
+    fallback_ok &= (fallback_report.find("Rookie Driver tends to gain 1.9 positions") != std::string::npos);
+    fallback_ok &= (fallback_report.find("based on team-level form") != std::string::npos);
+    fallback_ok &= (fallback_report.find("fewer than 10 personal races") != std::string::npos);
+    // Must not be confused with the "no data at all" path.
+    fallback_ok &= (fallback_report.find("No driver-specific adjustment") == std::string::npos);
+    ok &= fallback_ok;
+
+    if (!fallback_ok) {
+        std::cout << "[FAIL] Team-fallback report did not apply the shift or label its source correctly: " << fallback_report << "\n";
+    }
+
     // --- Unseen grid position: clear "no data" message, no fabrication ---
     std::string no_data_report = reporter.report_single(99, "Test Driver");
     bool no_data_ok = (no_data_report.find("No historical data") != std::string::npos)
@@ -800,11 +959,17 @@ void test_strategy_reporter_real() {
 
     MarkovTrainer trainer;
     trainer.train(resolve_repo_path("data/results.json"));
-    std::map<std::string, double> indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
+    std::map<std::string, double> raw_indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
+
+    std::map<std::string, DriverAdjustment> indices;
+    for (const auto& [driver, idx] : raw_indices) {
+        indices[driver] = { idx, false };
+    }
+
     MarkovEngine engine(trainer.get_counts());
     StrategyReporter reporter(engine, indices);
 
-    std::vector<std::pair<std::string, double>> sorted_indices(indices.begin(), indices.end());
+    std::vector<std::pair<std::string, double>> sorted_indices(raw_indices.begin(), raw_indices.end());
     std::sort(sorted_indices.begin(), sorted_indices.end(),
         [](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b) {
             return a.second > b.second;
@@ -818,10 +983,28 @@ void test_strategy_reporter_real() {
                    << reporter.report_single(5, strong_driver) << "\n";
     }
 
-    std::cout << "\nOliver Bearman (filtered out, <10 races), starting P10:\n  "
+    std::cout << "\nOliver Bearman (own data filtered out, <10 races), starting P10:\n  "
                << reporter.report_single(10, "Oliver Bearman") << "\n";
 
     std::cout << "\nVerstappen, starting P1:\n  " << reporter.report_single(1, "Max Verstappen") << "\n";
+
+    // Bearman has <10 personal races but his team (Haas) has plenty --
+    // the service should use team-level form instead of no adjustment.
+    PitWallService service;
+    service.load("data");
+    std::string bearman_report = service.report(10, "Oliver Bearman");
+    std::cout << "\nOliver Bearman via PitWallService (team-fallback expected), starting P10:\n  "
+               << bearman_report << "\n";
+
+    bool fallback_ok = (bearman_report.find("based on team-level form") != std::string::npos)
+        && (bearman_report.find("No driver-specific adjustment is available for Oliver Bearman") == std::string::npos);
+
+    if (fallback_ok) {
+        std::cout << "[PASS] PitWallService applied a team-level fallback adjustment for a low-sample real driver.\n";
+    }
+    else {
+        std::cout << "[FAIL] PitWallService did not apply the expected team-level fallback for Oliver Bearman.\n";
+    }
 }
 
 void test_compare() {
@@ -830,7 +1013,7 @@ void test_compare() {
 
     // Grid 3 pooled: finish 2 x6 (60%), finish 4 x4 (40%).
     // Grid 6 pooled: finish 5 x1 (50%), finish 9 x1 (50%) -> expected 7.0.
-    std::map<int, std::map<int, int>> counts;
+    std::map<int, std::map<int, double>> counts;
     counts[3][2] = 6;
     counts[3][4] = 4;
     counts[6][5] = 1;
@@ -840,8 +1023,8 @@ void test_compare() {
     // Only "Fast Driver" has an index; "Slow Driver" is unindexed
     // (fewer than 10 races), so it must fall back to the pooled distribution
     // and report the honest no-adjustment note.
-    std::map<std::string, double> indices;
-    indices["Fast Driver"] = 1.0;  // exact integer shift: {2,4} -> {1,3}, expected 1.8
+    std::map<std::string, DriverAdjustment> indices;
+    indices["Fast Driver"] = { 1.0, false };  // exact integer shift: {2,4} -> {1,3}, expected 1.8
 
     StrategyReporter reporter(engine, indices);
 
@@ -866,6 +1049,19 @@ void test_compare() {
 
     // Fast Driver has an index -- must NOT get the no-adjustment note.
     ok &= (report.find("No driver-specific adjustment is available for Fast Driver") == std::string::npos);
+
+    // --- Team-fallback driver in a comparison gets its own labeled note,
+    // distinct from both the own-data driver and the no-data driver ---
+    indices["Team Rookie"] = { 0.5, true };
+    std::string fallback_report = reporter.compare(3, "Fast Driver", 3, "Team Rookie");
+    bool fallback_ok = true;
+    fallback_ok &= (fallback_report.find("Team Rookie's adjustment is based on team-level form") != std::string::npos);
+    fallback_ok &= (fallback_report.find("No driver-specific adjustment is available for Team Rookie") == std::string::npos);
+    ok &= fallback_ok;
+
+    if (!fallback_ok) {
+        std::cout << "[FAIL] Compare did not label the team-fallback driver correctly: " << fallback_report << "\n";
+    }
 
     if (!ok) {
         std::cout << "[FAIL] Compare output did not match expectations: " << report << "\n";
@@ -954,10 +1150,8 @@ void test_dirichlet_finish_model() {
     // reused a cached ratio).
     ok &= (through_3 != through_2);
 
-    // race4 is grid==0 -> no new evidence -- but the cutoff still advances,
-    // so race1..race3's existing evidence decays one step further even
-    // though nothing new was added. k is measured from the cutoff N, not
-    // from the latest evidence-bearing race.
+    // race4 (grid==0) adds no evidence, but the cutoff still advances, so
+    // race1..race3's existing evidence decays one step further regardless.
     double c4_1 = 1.0 + std::pow(lambda, 3) + std::pow(lambda, 1);
     double c4_2 = 1.0 + std::pow(lambda, 2);
     double c4_3 = 1.0;
@@ -994,10 +1188,8 @@ void test_dirichlet_recency_weighting() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // Driver Z: worst finish (P5) in race 1, steadily improving to a win
-    // (P1) in race 4 -- an improving-driver arc (like Norris's) that
-    // equal-weighting would underrate relative to a flash of early-season
-    // form.
+    // Driver Z improves steadily from P5 to a win by race 4 -- equal
+    // weighting would underrate this arc relative to early-season form.
     {
         std::ofstream f(results_path);
         f << R"([
@@ -1073,12 +1265,9 @@ void test_championship_simulator() {
     fs::create_directories(temp_dir);
     fs::path results_path = temp_dir / "results.json";
 
-    // 20 races; Driver A always P1, Driver B always P2. Simulating from
-    // race 10 gives Driver A a real 10-0 Dirichlet posterior while leaving
-    // enough remaining points that clinch/elimination can't short-circuit
-    // it -- the result has to come from the real sample-then-rank RNG path.
-    // Unlike a pooled distribution, the Dirichlet prior keeps nonzero mass
-    // everywhere, so dominance is checked as "overwhelming", not exact 1.0.
+    // Driver A always P1, Driver B always P2, simulated from race 10 with
+    // enough remaining points that clinch/elimination can't short-circuit.
+    // Dominance is checked as "overwhelming", not exact 1.0 (Dirichlet prior).
     {
         std::ostringstream rows;
         for (int race = 1; race <= 20; ++race) {

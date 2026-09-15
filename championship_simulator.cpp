@@ -156,11 +156,8 @@ std::map<std::string, double> ChampionshipSimulator::simulate_championship(int f
     // across the remaining races being simulated.
     std::map<std::string, DriverSampler> named_samplers = build_bayesian_samplers(from_race);
 
-    // Flatten the name-keyed samplers into parallel index-aligned vectors so
-    // the num_simulations x remaining_races inner loop below never has to
-    // allocate or compare through a string-keyed container -- driver identity
-    // is only needed once more, when the per-index win credit is written back
-    // into the returned name-keyed result.
+    // Flatten into index-aligned vectors so the inner simulation loop never
+    // allocates or compares through a string-keyed container.
     size_t n = named_samplers.size();
     std::vector<std::string> sim_drivers;
     std::vector<DriverSampler> samplers;

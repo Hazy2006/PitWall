@@ -61,7 +61,7 @@ namespace {
     }
 }
 
-StrategyReporter::StrategyReporter(const MarkovEngine& engine, const std::map<std::string, double>& driver_indices)
+StrategyReporter::StrategyReporter(const MarkovEngine& engine, const std::map<std::string, DriverAdjustment>& driver_indices)
     : engine(engine), driver_indices(driver_indices) {
 }
 
@@ -96,7 +96,7 @@ std::string StrategyReporter::report_single(int grid_position, const std::string
         return out.str();
     }
 
-    double index = it->second;
+    double index = it->second.index;
     double rounded_index = std::round(index * 10.0) / 10.0;
 
     std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(grid_position, index);
@@ -111,6 +111,10 @@ std::string StrategyReporter::report_single(int grid_position, const std::string
     }
     else {
         out << "finish in line with their grid slot historically";
+    }
+
+    if (it->second.is_team_fallback) {
+        out << " (based on team-level form -- fewer than 10 personal races on record)";
     }
 
     if (shifted_top != top_finish) {
@@ -142,10 +146,10 @@ std::string StrategyReporter::compare(int grid_a, const std::string& driver_a, i
     auto it_b = driver_indices.find(driver_b);
 
     std::map<int, double> dist_a = (it_a != driver_indices.end())
-        ? engine.predict_finish_distribution_for_driver(grid_a, it_a->second)
+        ? engine.predict_finish_distribution_for_driver(grid_a, it_a->second.index)
         : pooled_a;
     std::map<int, double> dist_b = (it_b != driver_indices.end())
-        ? engine.predict_finish_distribution_for_driver(grid_b, it_b->second)
+        ? engine.predict_finish_distribution_for_driver(grid_b, it_b->second.index)
         : pooled_b;
 
     double expected_a = expected_finish(dist_a);
@@ -157,11 +161,17 @@ std::string StrategyReporter::compare(int grid_a, const std::string& driver_a, i
         out << " No driver-specific adjustment is available for " << driver_a
             << " (fewer than 10 races in the dataset).";
     }
+    else if (it_a->second.is_team_fallback) {
+        out << " " << driver_a << "'s adjustment is based on team-level form (fewer than 10 personal races).";
+    }
 
     out << " " << driver_b << " starting P" << grid_b << ": expected finish P" << finish_str(expected_b) << ".";
     if (it_b == driver_indices.end()) {
         out << " No driver-specific adjustment is available for " << driver_b
             << " (fewer than 10 races in the dataset).";
+    }
+    else if (it_b->second.is_team_fallback) {
+        out << " " << driver_b << "'s adjustment is based on team-level form (fewer than 10 personal races).";
     }
 
     // Lower expected finish is better; a tie favors driver_a deterministically.

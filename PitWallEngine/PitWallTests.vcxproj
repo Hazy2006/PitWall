@@ -164,6 +164,8 @@
     <ClInclude Include="..\dirichlet_finish_model.h" />
     <ClInclude Include="..\path_utils.h" />
     <ClInclude Include="..\json_utils.h" />
+    <ClInclude Include="..\recency.h" />
+    <ClInclude Include="..\driver_adjustment.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />

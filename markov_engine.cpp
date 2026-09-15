@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-MarkovEngine::MarkovEngine(const std::map<int, std::map<int, int>>& transition_counts)
+MarkovEngine::MarkovEngine(const std::map<int, std::map<int, double>>& transition_counts)
     : counts(transition_counts) {
 }
 
@@ -14,18 +14,18 @@ std::map<int, double> MarkovEngine::predict_finish_distribution(int grid_positio
         return distribution;
     }
 
-    const std::map<int, int>& row = row_it->second;
-    int row_total = 0;
-    for (const auto& [finish, count] : row) {
-        row_total += count;
+    const std::map<int, double>& row = row_it->second;
+    double row_total = 0.0;
+    for (const auto& [finish, weight] : row) {
+        row_total += weight;
     }
 
-    if (row_total == 0) {
+    if (row_total <= 0.0) {
         return distribution;
     }
 
-    for (const auto& [finish, count] : row) {
-        distribution[finish] = static_cast<double>(count) / static_cast<double>(row_total);
+    for (const auto& [finish, weight] : row) {
+        distribution[finish] = weight / row_total;
     }
 
     return distribution;

@@ -1,18 +1,11 @@
 #include "dirichlet_finish_model.h"
 #include "json_utils.h"
+#include "recency.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
 
 using json = nlohmann::json;
-
-namespace {
-    // Exponential recency decay applied to evidence: a race k races before
-    // the cutoff contributes lambda^k instead of a flat 1.0. 0.85 balances
-    // responsiveness to recent form against overreacting to a single race;
-    // higher approaches equal weighting, lower becomes too jumpy.
-    constexpr double RECENCY_LAMBDA = 0.85;
-}
 
 DirichletFinishModel::DirichletFinishModel(const std::string& results_json_path) {
     load(results_json_path);

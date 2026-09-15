@@ -5,14 +5,14 @@
 #include "markov_engine.h"
 #include "strategy_reporter.h"
 #include "championship_simulator.h"
+#include "driver_adjustment.h"
 #include <map>
 #include <optional>
 #include <string>
 
-// Owns the prediction pipeline. MarkovEngine/StrategyReporter/
-// ChampionshipSimulator hold const& into other members, so declaration
-// order controls destruction and copy/move are disabled to protect those
-// references.
+// Owns the prediction pipeline. Members hold const& into each other, so
+// declaration order controls destruction; copy/move are disabled to
+// protect those references.
 class PitWallService {
 public:
     PitWallService();
@@ -44,7 +44,7 @@ private:
 
     Graph graph_;
     MarkovTrainer trainer_;
-    std::map<std::string, double> driver_indices_;
+    std::map<std::string, DriverAdjustment> driver_indices_;
     DataImporter importer_;
     std::optional<MarkovEngine> engine_;
     std::optional<ChampionshipSimulator> simulator_;
