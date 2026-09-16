@@ -166,6 +166,7 @@
     <ClInclude Include="..\json_utils.h" />
     <ClInclude Include="..\recency.h" />
     <ClInclude Include="..\driver_adjustment.h" />
+    <ClInclude Include="..\result_row.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
