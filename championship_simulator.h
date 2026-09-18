@@ -1,5 +1,6 @@
 #pragma once
 #include "dirichlet_finish_model.h"
+#include "result_row.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -7,7 +8,7 @@
 
 class ChampionshipSimulator {
 public:
-    ChampionshipSimulator(const std::string& results_json_path,
+    ChampionshipSimulator(const std::vector<ResultRow>& results,
                           unsigned int seed = 42);
 
     int race_count() const;
@@ -21,19 +22,12 @@ public:
     std::map<std::string, double> simulate_championship(int from_race, int num_simulations = 10000) const;
 
 private:
-    struct RaceResult {
-        std::string driver_name;
-        std::string circuit_name;
-        int position;
-        int grid;
-    };
-
     struct DriverSampler {
         std::vector<int> finishes;
         std::discrete_distribution<int> dist;
     };
 
-    void load_results(const std::string& results_json_path);
+    void index_results(const std::vector<ResultRow>& results);
 
     static DriverSampler make_sampler(const std::map<int, double>& distribution);
 
@@ -42,9 +36,9 @@ private:
     std::map<std::string, DriverSampler> build_bayesian_samplers(int from_race) const;
 
     DirichletFinishModel dirichlet_model_;
-    std::vector<RaceResult> results_;
-    std::vector<std::string> race_order_;
-    std::vector<std::vector<const RaceResult*>> races_;
+    std::vector<ResultRow> results_;
+    int race_count_ = 0;
+    std::vector<std::vector<const ResultRow*>> races_;
     std::vector<std::string> all_drivers_;
     mutable std::mt19937 rng_;
 };

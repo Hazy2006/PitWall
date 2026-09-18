@@ -99,7 +99,7 @@ std::string StrategyReporter::report_single(int grid_position, const std::string
     double index = it->second.index;
     double rounded_index = std::round(index * 10.0) / 10.0;
 
-    std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(grid_position, index);
+    std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(grid_position, it->second.delta_distribution);
     int shifted_top = shifted.empty() ? top_finish : best_finish_of(shifted);
 
     out << " " << driver_name << " tends to ";
@@ -146,10 +146,10 @@ std::string StrategyReporter::compare(int grid_a, const std::string& driver_a, i
     auto it_b = driver_indices.find(driver_b);
 
     std::map<int, double> dist_a = (it_a != driver_indices.end())
-        ? engine.predict_finish_distribution_for_driver(grid_a, it_a->second.index)
+        ? engine.predict_finish_distribution_for_driver(grid_a, it_a->second.delta_distribution)
         : pooled_a;
     std::map<int, double> dist_b = (it_b != driver_indices.end())
-        ? engine.predict_finish_distribution_for_driver(grid_b, it_b->second.index)
+        ? engine.predict_finish_distribution_for_driver(grid_b, it_b->second.delta_distribution)
         : pooled_b;
 
     double expected_a = expected_finish(dist_a);

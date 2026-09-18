@@ -40,23 +40,17 @@ void DataImporter::import_circuits(const std::string& path) {
     }
 }
 
-void DataImporter::import_results(const std::string& path) {
-    json data = load_json_array(path);
-
+void DataImporter::import_results(const std::vector<ResultRow>& results) {
     struct RaceStats {
         int wins = 0;
         int total = 0;
     };
     std::map<std::pair<std::string, std::string>, RaceStats> stats_by_driver_circuit;
 
-    for (const auto& entry : data) {
-        std::string driver_name = entry.at("driver_name").get<std::string>();
-        std::string circuit_name = entry.at("circuit_name").get<std::string>();
-        int position = entry.at("position").get<int>();
-
-        RaceStats& stats = stats_by_driver_circuit[{ driver_name, circuit_name }];
+    for (const auto& row : results) {
+        RaceStats& stats = stats_by_driver_circuit[{ row.driver_name, row.circuit_name }];
         stats.total += 1;
-        if (position == 1) {
+        if (row.position == 1) {
             stats.wins += 1;
         }
     }

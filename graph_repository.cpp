@@ -1,21 +1,9 @@
 #include "graph_repository.h"
 #include "node.h"
+#include <cstdint>
 #include <stdexcept>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
 
 namespace {
-    std::string sql_escape(const std::string& s) {
-        std::string out;
-        out.reserve(s.size());
-        for (char c : s) {
-            if (c == '\'') out += '\'';
-            out += c;
-        }
-        return out;
-    }
-
     std::shared_ptr<Node> make_node(const std::string& type,
                                      const std::string& name,
                                      double param1, double param2) {
@@ -53,7 +41,7 @@ void GraphRepository::save_graph(const Graph& g) {
     for (int id : g.get_all_node_ids()) {
         std::shared_ptr<Node> node = g.get_node(id);
         std::string type = node->get_type_string();
-        std::string name = sql_escape(node->get_name());
+        std::string name = node->get_name();
         double param1 = 0.0;
         double param2 = 0.0;
 
@@ -68,22 +56,18 @@ void GraphRepository::save_graph(const Graph& g) {
             param1 = circuit->base_degradation_rate;
         }
 
-        std::ostringstream sql;
-        sql << std::setprecision(17);
-        sql << "INSERT INTO nodes (id, type, name, param1, param2) VALUES ("
-            << id << ", '" << type << "', '" << name << "', "
-            << param1 << ", " << param2 << ");";
-        storage.execute(sql.str());
+        storage.execute(
+            "INSERT INTO nodes (id, type, name, param1, param2) VALUES (?, ?, ?, ?, ?);",
+            { static_cast<int64_t>(id), type, name, param1, param2 }
+        );
     }
 
     for (const auto& key : g.get_all_edge_keys()) {
         Edge e = g.get_edge(key.first, key.second);
-        std::ostringstream sql;
-        sql << std::setprecision(17);
-        sql << "INSERT INTO edges (source_id, target_id, win_rate) VALUES ("
-            << key.first << ", " << key.second << ", "
-            << e.winRate << ");";
-        storage.execute(sql.str());
+        storage.execute(
+            "INSERT INTO edges (source_id, target_id, win_rate) VALUES (?, ?, ?);",
+            { static_cast<int64_t>(key.first), static_cast<int64_t>(key.second), e.winRate }
+        );
     }
 }
 

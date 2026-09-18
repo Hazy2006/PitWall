@@ -1,4 +1,5 @@
 #pragma once
+#include "result_row.h"
 #include <map>
 #include <set>
 #include <string>
@@ -9,7 +10,7 @@
 // forecasts from race N can't leak knowledge of how the season turned out.
 class DirichletFinishModel {
 public:
-    explicit DirichletFinishModel(const std::string& results_json_path);
+    explicit DirichletFinishModel(const std::vector<ResultRow>& results);
 
     int race_count() const;
 
@@ -19,11 +20,11 @@ public:
     std::map<int, double> driver_finish_distribution(const std::string& driver_name, int through_race) const;
 
 private:
-    void load(const std::string& results_json_path);
+    void load(const std::vector<ResultRow>& results);
 
-    std::vector<std::string> race_order_;  
+    int race_count_ = 0;
     std::set<std::string> all_drivers_;
-    // driver -> list of (0-based race index, finish position), grid != 0 rows only.
+    // driver -> list of (0-based race_order, finish position), grid != 0 rows only.
     std::map<std::string, std::vector<std::pair<int, int>>> driver_race_finishes_;
     int max_position_ = 0;
 };

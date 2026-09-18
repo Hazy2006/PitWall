@@ -11,8 +11,8 @@ public:
     std::map<int, double> predict_finish_distribution(int grid_position) const;
     int most_likely_finish(int grid_position) const;
 
-    // Shifts the pooled distribution by driver_index positions (scalar
-    // handicap). Fractional mass splits across straddling integer
-    // positions, clamped to [1, max finish]; a P1 starter can never "gain".
-    std::map<int, double> predict_finish_distribution_for_driver(int grid_position, double driver_index) const;
+    // Convolves the pooled distribution with a driver's (or team's) own
+    // distribution over grid-minus-finish deltas, clamped to [1, max
+    // finish]; a P1 starter can never "gain".
+    std::map<int, double> predict_finish_distribution_for_driver(int grid_position, const std::map<int, double>& delta_distribution) const;
 };

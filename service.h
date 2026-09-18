@@ -1,6 +1,7 @@
 #pragma once
-#include "graph.h"
-#include "data_importer.h"
+#include "storage.h"
+#include "results_importer.h"
+#include "result_row.h"
 #include "markov_trainer.h"
 #include "markov_engine.h"
 #include "strategy_reporter.h"
@@ -9,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Owns the prediction pipeline. Members hold const& into each other, so
 // declaration order controls destruction; copy/move are disabled to
@@ -37,15 +39,14 @@ public:
     int race_count() const;
 
 private:
-    void importData(const std::string& data_dir);
-    void trainModel(const std::string& data_dir);
-    void applyIndices();
+    std::vector<ResultRow> loadResults(const std::string& data_dir);
+    void trainModel(const std::vector<ResultRow>& results);
     void buildReporter();
 
-    Graph graph_;
+    Storage storage_;
+    ResultsImporter results_importer_;
     MarkovTrainer trainer_;
     std::map<std::string, DriverAdjustment> driver_indices_;
-    DataImporter importer_;
     std::optional<MarkovEngine> engine_;
     std::optional<ChampionshipSimulator> simulator_;
     std::optional<StrategyReporter> reporter_;

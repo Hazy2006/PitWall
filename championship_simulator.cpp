@@ -1,12 +1,7 @@
 #include "championship_simulator.h"
-#include "json_utils.h"
-#include <nlohmann/json.hpp>
-#include <stdexcept>
 #include <cmath>
 #include <algorithm>
 #include <set>
-
-using json = nlohmann::json;
 
 namespace {
     double points_for_position(int position) {
@@ -31,47 +26,34 @@ ChampionshipSimulator::DriverSampler ChampionshipSimulator::make_sampler(const s
     return sampler;
 }
 
-ChampionshipSimulator::ChampionshipSimulator(const std::string& results_json_path,
+ChampionshipSimulator::ChampionshipSimulator(const std::vector<ResultRow>& results,
                                               unsigned int seed)
-    : dirichlet_model_(results_json_path), rng_(seed) {
-    load_results(results_json_path);
+    : dirichlet_model_(results), rng_(seed) {
+    index_results(results);
 }
 
-void ChampionshipSimulator::load_results(const std::string& results_json_path) {
-    json data = load_json_array(results_json_path);
+void ChampionshipSimulator::index_results(const std::vector<ResultRow>& results) {
+    results_ = results;
 
-    std::map<std::string, int> race_index_by_circuit;
-    std::set<std::string> seen_drivers;
-
-    for (const auto& entry : data) {
-        RaceResult r;
-        r.driver_name = entry.at("driver_name").get<std::string>();
-        r.circuit_name = entry.at("circuit_name").get<std::string>();
-        r.position = entry.at("position").get<int>();
-        r.grid = entry.at("grid").get<int>();
-        results_.push_back(r);
-
-        if (race_index_by_circuit.find(r.circuit_name) == race_index_by_circuit.end()) {
-            race_index_by_circuit[r.circuit_name] = static_cast<int>(race_order_.size());
-            race_order_.push_back(r.circuit_name);
-        }
-
-        if (seen_drivers.insert(r.driver_name).second) {
-            all_drivers_.push_back(r.driver_name);
-        }
+    for (const auto& row : results_) {
+        race_count_ = std::max(race_count_, row.race_order + 1);
     }
 
     // Second pass, after results_ has stopped growing: races_ stores pointers
     // into results_ elements, which would be invalidated by any reallocation.
-    races_.assign(race_order_.size(), {});
-    for (const auto& r : results_) {
-        int race_index = race_index_by_circuit.at(r.circuit_name);
-        races_[race_index].push_back(&r);
+    races_.assign(race_count_, {});
+
+    std::set<std::string> seen_drivers;
+    for (const auto& row : results_) {
+        races_[row.race_order].push_back(&row);
+        if (seen_drivers.insert(row.driver_name).second) {
+            all_drivers_.push_back(row.driver_name);
+        }
     }
 }
 
 int ChampionshipSimulator::race_count() const {
-    return static_cast<int>(race_order_.size());
+    return race_count_;
 }
 
 std::map<std::string, double> ChampionshipSimulator::points_through_race(int through_race) const {
@@ -82,7 +64,7 @@ std::map<std::string, double> ChampionshipSimulator::points_through_race(int thr
 
     int race_limit = std::min(through_race, static_cast<int>(races_.size()));
     for (int i = 0; i < race_limit; ++i) {
-        for (const RaceResult* r : races_[i]) {
+        for (const ResultRow* r : races_[i]) {
             points[r->driver_name] += points_for_position(r->position);
         }
     }

@@ -160,12 +160,14 @@
     <ClInclude Include="..\recency.h" />
     <ClInclude Include="..\driver_adjustment.h" />
     <ClInclude Include="..\result_row.h" />
+    <ClInclude Include="..\results_importer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\graph.cpp" />
     <ClCompile Include="..\graph_repository.cpp" />
     <ClCompile Include="..\main.cpp" />
     <ClCompile Include="..\storage.cpp" />
+    <ClCompile Include="..\results_importer.cpp" />
     <ClCompile Include="..\data_importer.cpp" />
     <ClCompile Include="..\markov_trainer.cpp" />
     <ClCompile Include="..\markov_engine.cpp" />

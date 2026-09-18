@@ -1,62 +1,59 @@
 #include "service.h"
-#include "node.h"
 #include "path_utils.h"
-#include <memory>
 
-PitWallService::PitWallService() : importer_(graph_) {}
+namespace {
+    double mean_of(const std::map<int, double>& distribution) {
+        double mean = 0.0;
+        for (const auto& [delta, prob] : distribution) {
+            mean += delta * prob;
+        }
+        return mean;
+    }
+}
+
+PitWallService::PitWallService() : storage_(":memory:"), results_importer_(storage_) {}
 
 void PitWallService::load(const std::string& data_dir) {
     std::string resolved_dir = resolve_repo_path(data_dir);
-    importData(resolved_dir);
-    trainModel(resolved_dir);
-    applyIndices();
+    std::vector<ResultRow> results = loadResults(resolved_dir);
+    trainModel(results);
     buildReporter();
 }
 
-void PitWallService::importData(const std::string& data_dir) {
-    importer_.import_drivers(data_dir + "/drivers.json");
-    importer_.import_teams(data_dir + "/teams.json");
-    importer_.import_circuits(data_dir + "/circuits.json");
-    importer_.import_results(data_dir + "/results.json");
+std::vector<ResultRow> PitWallService::loadResults(const std::string& data_dir) {
+    results_importer_.create_tables();
+    results_importer_.import_from_json(data_dir);
+    return results_importer_.load_results();
 }
 
-void PitWallService::trainModel(const std::string& data_dir) {
-    trainer_.train(data_dir + "/results.json");
+void PitWallService::trainModel(const std::vector<ResultRow>& results) {
+    trainer_.train(results);
 
-    std::map<std::string, double> driver_only = trainer_.compute_driver_indices(data_dir + "/results.json");
-    std::map<std::string, double> team_only = trainer_.compute_team_indices(data_dir + "/results.json");
-    std::map<std::string, std::string> driver_teams = trainer_.compute_driver_teams(data_dir + "/results.json");
+    std::map<std::string, double> driver_only = trainer_.compute_driver_indices(results);
+    std::map<std::string, double> team_only = trainer_.compute_team_indices(results);
+    std::map<std::string, std::string> driver_teams = trainer_.compute_driver_teams(results);
+    std::map<std::string, std::map<int, double>> driver_deltas = trainer_.compute_driver_delta_distributions(results);
+    std::map<std::string, std::map<int, double>> team_deltas = trainer_.compute_team_delta_distributions(results);
 
     driver_indices_.clear();
     for (const auto& [driver, team] : driver_teams) {
         auto driver_it = driver_only.find(driver);
         if (driver_it != driver_only.end()) {
-            driver_indices_[driver] = { driver_it->second, false };
+            const auto& dist = driver_deltas.at(driver);
+            driver_indices_[driver] = { mean_of(dist), dist, false };
             continue;
         }
         // Driver has fewer than 10 personal races -- fall back to their
-        // team's pooled index instead of leaving them unpersonalized.
+        // team's pooled distribution instead of leaving them unpersonalized.
         auto team_it = team_only.find(team);
         if (team_it != team_only.end()) {
-            driver_indices_[driver] = { team_it->second, true };
+            const auto& dist = team_deltas.at(team);
+            driver_indices_[driver] = { mean_of(dist), dist, true };
         }
     }
 
     engine_.emplace(trainer_.get_counts());
-    simulator_.emplace(data_dir + "/results.json");
-}
-
-void PitWallService::applyIndices() {
-    for (const auto& [name, adjustment] : driver_indices_) {
-        int id = importer_.get_node_id(name);
-        if (id < 0) {
-            continue;
-        }
-        auto driver_node = std::dynamic_pointer_cast<DriverNode>(graph_.get_node(id));
-        if (driver_node) {
-            driver_node->base_pace_delta = adjustment.index;
-        }
-    }
+    simulator_.emplace(results);
 }
 
 void PitWallService::buildReporter() {

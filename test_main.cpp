@@ -10,6 +10,9 @@ void test_remove_node();
 void test_dijkstra();
 void test_save_and_load();
 void test_save_and_load_with_id_gap();
+void test_results_importer();
+void test_results_importer_idempotent();
+void test_results_importer_load_results();
 void test_data_importer();
 void test_real_import();
 void test_markov_trainer();
@@ -19,6 +22,8 @@ void test_markov_real();
 void test_driver_index();
 void test_compute_team_indices();
 void test_compute_driver_teams();
+void test_driver_delta_distribution();
+void test_team_delta_distribution();
 void test_driver_aware_prediction();
 void test_driver_index_real();
 void test_strategy_reporter();
@@ -31,6 +36,8 @@ void test_championship_clinch();
 void test_championship_elimination();
 void test_championship_points_through_race();
 void test_championship_real();
+void test_championship_calibration_2024_real();
+void test_championship_calibration_2012_real();
 
 int main() {
 	std::ostringstream captured;
@@ -55,6 +62,12 @@ int main() {
 	std::cout << "==================================\n";
 	test_save_and_load_with_id_gap();
 	std::cout << "==================================\n";
+	test_results_importer();
+	std::cout << "==================================\n";
+	test_results_importer_idempotent();
+	std::cout << "==================================\n";
+	test_results_importer_load_results();
+	std::cout << "==================================\n";
 	test_data_importer();
 	std::cout << "==================================\n";
 	test_real_import();
@@ -74,6 +87,10 @@ int main() {
 	test_compute_team_indices();
 	std::cout << "==================================\n";
 	test_compute_driver_teams();
+	std::cout << "==================================\n";
+	test_driver_delta_distribution();
+	std::cout << "==================================\n";
+	test_team_delta_distribution();
 	std::cout << "==================================\n";
 	test_driver_aware_prediction();
 	std::cout << "==================================\n";
@@ -96,6 +113,10 @@ int main() {
 	test_championship_points_through_race();
 	std::cout << "==================================\n";
 	test_championship_real();
+	std::cout << "==================================\n";
+	test_championship_calibration_2024_real();
+	std::cout << "==================================\n";
+	test_championship_calibration_2012_real();
 
 	std::cout.rdbuf(real_cout);
 	std::string output = captured.str();

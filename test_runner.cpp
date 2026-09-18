@@ -1,6 +1,7 @@
 #include "graph.h"
 #include "storage.h"
 #include "graph_repository.h"
+#include "results_importer.h"
 #include "data_importer.h"
 #include "markov_trainer.h"
 #include "markov_engine.h"
@@ -18,6 +19,27 @@
 #include <cmath>
 #include <algorithm>
 #include <sstream>
+
+namespace {
+    // Bridges a test's JSON fixture into a ResultRow vector via the real
+    // ResultsImporter pipeline (in-memory DB), instead of a parallel
+    // test-only JSON reader.
+    std::vector<ResultRow> load_test_results(const std::filesystem::path& dir) {
+        namespace fs = std::filesystem;
+        for (const char* name : { "drivers.json", "teams.json", "circuits.json" }) {
+            fs::path p = dir / name;
+            if (!fs::exists(p)) {
+                std::ofstream f(p);
+                f << "[]";
+            }
+        }
+        Storage storage(":memory:");
+        ResultsImporter importer(storage);
+        importer.create_tables();
+        importer.import_from_json(dir.string());
+        return importer.load_results();
+    }
+}
 
 void run_domain_tests() {
     std::cout << "--- Running Polymorphic Domain Graph Test ---\n";
@@ -288,6 +310,150 @@ void test_save_and_load_with_id_gap() {
     }
 }
 
+void test_results_importer() {
+    std::cout << "--- Running ResultsImporter Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_results_importer_test";
+    fs::create_directories(temp_dir);
+
+    { std::ofstream f(temp_dir / "drivers.json"); f << R"([{"name": "Driver A"}])"; }
+    { std::ofstream f(temp_dir / "teams.json"); f << R"([{"name": "Team One"}])"; }
+    { std::ofstream f(temp_dir / "circuits.json"); f << R"([{"name": "Circuit One"}])"; }
+    { std::ofstream f(temp_dir / "results.json");
+      f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 0, "team_name": "Team Two"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Two", "position": 3, "grid": 2, "team_name": "Team One"}
+        ])"; }
+
+    fs::path db_path = temp_dir / "test.db";
+    fs::remove(db_path);
+    bool ok = true;
+    {
+        Storage storage(db_path.string());
+        ResultsImporter importer(storage);
+        importer.create_tables();
+        importer.import_from_json(temp_dir.string());
+
+        // Driver B and Team Two only appear in results.json, not their
+        // own metadata files -- must still be created.
+        auto drivers = storage.query("SELECT name FROM drivers ORDER BY name;");
+        ok &= (drivers.size() == 2);
+        ok &= (drivers[0].at("name") == "Driver A");
+        ok &= (drivers[1].at("name") == "Driver B");
+
+        auto teams = storage.query("SELECT name FROM teams ORDER BY name;");
+        ok &= (teams.size() == 2);
+
+        auto races = storage.query("SELECT race_order FROM races ORDER BY race_order;");
+        ok &= (races.size() == 2);
+        ok &= (races[0].at("race_order") == "0");
+        ok &= (races[1].at("race_order") == "1");
+
+        // All 3 result rows preserved, including the grid==0 one.
+        auto results = storage.query("SELECT grid FROM results;");
+        ok &= (results.size() == 3);
+    }
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] ResultsImporter populated all tables, upserted entities missing from "
+                     "metadata JSON, and preserved the grid==0 row.\n";
+    }
+    else {
+        std::cout << "[FAIL] ResultsImporter output did not match expectations.\n";
+    }
+}
+
+void test_results_importer_idempotent() {
+    std::cout << "--- Running ResultsImporter Idempotency Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_results_importer_idempotent_test";
+    fs::create_directories(temp_dir);
+
+    { std::ofstream f(temp_dir / "drivers.json"); f << R"([{"name": "Driver A"}])"; }
+    { std::ofstream f(temp_dir / "teams.json"); f << R"([{"name": "Team One"}])"; }
+    { std::ofstream f(temp_dir / "circuits.json"); f << R"([{"name": "Circuit One"}])"; }
+    { std::ofstream f(temp_dir / "results.json");
+      f << R"([{"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"}])"; }
+
+    fs::path db_path = temp_dir / "test.db";
+    fs::remove(db_path);
+    bool ok = true;
+    {
+        Storage storage(db_path.string());
+        ResultsImporter importer(storage);
+        importer.create_tables();
+        importer.import_from_json(temp_dir.string());
+        importer.import_from_json(temp_dir.string());  // must no-op
+
+        auto results = storage.query("SELECT COUNT(*) AS n FROM results;");
+        ok &= (results.at(0).at("n") == "1");
+    }
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] ResultsImporter's second call was a no-op against an already-populated database.\n";
+    }
+    else {
+        std::cout << "[FAIL] ResultsImporter was not idempotent.\n";
+    }
+}
+
+void test_results_importer_load_results() {
+    std::cout << "--- Running ResultsImporter::load_results Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_results_importer_load_results_test";
+    fs::create_directories(temp_dir);
+
+    { std::ofstream f(temp_dir / "drivers.json"); f << "[]"; }
+    { std::ofstream f(temp_dir / "teams.json"); f << "[]"; }
+    { std::ofstream f(temp_dir / "circuits.json"); f << "[]"; }
+    { std::ofstream f(temp_dir / "results.json");
+      f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver A", "circuit_name": "Circuit Two", "position": 3, "grid": 2, "team_name": "Team One"}
+        ])"; }
+
+    bool ok = true;
+    {
+        Storage storage(":memory:");
+        ResultsImporter importer(storage);
+        importer.create_tables();
+        importer.import_from_json(temp_dir.string());
+
+        std::vector<ResultRow> results = importer.load_results();
+
+        ok &= (results.size() == 3);
+
+        // Ordered by race_order (Circuit One = 0, Circuit Two = 1), not by
+        // insertion order of drivers within a race -- if this were wrong,
+        // Circuit Two's row wouldn't sort last.
+        ok &= (results[0].circuit_name == "Circuit One") && (results[0].race_order == 0);
+        ok &= (results[1].circuit_name == "Circuit One") && (results[1].race_order == 0);
+        ok &= (results[2].circuit_name == "Circuit Two") && (results[2].race_order == 1);
+
+        // Field-by-field check on one row: every ResultRow field must survive
+        // the JOIN round-trip, not just the ones convenient to check above.
+        ok &= (results[2].driver_name == "Driver A");
+        ok &= (results[2].team_name == "Team One");
+        ok &= (results[2].position == 3);
+        ok &= (results[2].grid == 2);
+    }
+    fs::remove_all(temp_dir);
+
+    if (ok) {
+        std::cout << "[PASS] ResultsImporter::load_results returned every field correctly joined and ordered by race_order.\n";
+    }
+    else {
+        std::cout << "[FAIL] ResultsImporter::load_results output did not match expectations.\n";
+    }
+}
+
 void test_data_importer() {
     std::cout << "--- Running DataImporter Test ---\n";
 
@@ -328,12 +494,14 @@ void test_data_importer() {
         ])";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+
     Graph g;
     DataImporter importer(g);
     importer.import_drivers(drivers_path.string());
     importer.import_teams(teams_path.string());
     importer.import_circuits(circuits_path.string());
-    importer.import_results(results_path.string());
+    importer.import_results(results);
 
     bool ok = true;
     ok &= (g.count_vertices() == 4);
@@ -370,13 +538,15 @@ void test_data_importer() {
 void test_real_import() {
     std::cout << "--- Running Real Data Import Smoke Test ---\n";
 
+    std::vector<ResultRow> results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
+
     Graph g;
     DataImporter importer(g);
 
     importer.import_drivers(resolve_repo_path("data/drivers.json"));
     importer.import_teams(resolve_repo_path("data/teams.json"));
     importer.import_circuits(resolve_repo_path("data/circuits.json"));
-    importer.import_results(resolve_repo_path("data/results.json"));
+    importer.import_results(results);
 
     std::cout << "Total nodes: " << g.count_vertices() << "\n";
     std::cout << "Total edges: " << g.count_edges() << "\n";
@@ -384,23 +554,6 @@ void test_real_import() {
     for (int id : g.get_all_node_ids()) {
         auto node = g.get_node(id);
         std::cout << "  [" << id << "] " << node->get_name() << " (" << node->get_type_string() << ")\n";
-    }
-
-    bool can_persist = true;
-    try {
-        std::filesystem::remove("pitwall_f1.db");
-    }
-    catch (const std::filesystem::filesystem_error& e) {
-        std::cout << "[WARN] Could not remove pitwall_f1.db (" << e.what() << "); skipping persistence step.\n";
-        can_persist = false;
-    }
-
-    if (can_persist) {
-        Storage storage("pitwall_f1.db");
-        GraphRepository repo(storage);
-        repo.create_tables();
-        repo.save_graph(g);
-        std::cout << "Saved graph to pitwall_f1.db\n";
     }
 }
 
@@ -423,8 +576,9 @@ void test_markov_trainer() {
         ])";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
     MarkovTrainer trainer;
-    trainer.train(results_path.string());
+    trainer.train(results);
 
     fs::remove_all(temp_dir);
 
@@ -474,8 +628,9 @@ void test_markov_recency_weighting() {
         ])";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
     MarkovTrainer trainer;
-    trainer.train(results_path.string());
+    trainer.train(results);
     fs::remove_all(temp_dir);
 
     const auto& counts = trainer.get_counts();
@@ -563,8 +718,9 @@ void test_markov_engine() {
 void test_markov_real() {
     std::cout << "--- Running Real Data MarkovTrainer Smoke Test ---\n";
 
+    std::vector<ResultRow> real_results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
     MarkovTrainer trainer;
-    trainer.train(resolve_repo_path("data/results.json"));
+    trainer.train(real_results);
 
     std::cout << "Total observations: " << trainer.total_observations() << "\n";
 
@@ -614,8 +770,9 @@ void test_driver_index() {
         f << "[" << rows.str() << "]";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
     MarkovTrainer trainer;
-    std::map<std::string, double> indices = trainer.compute_driver_indices(results_path.string());
+    std::map<std::string, double> indices = trainer.compute_driver_indices(results);
 
     fs::remove_all(temp_dir);
 
@@ -663,8 +820,9 @@ void test_compute_team_indices() {
         f << "[" << rows.str() << "]";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
     MarkovTrainer trainer;
-    std::map<std::string, double> team_indices = trainer.compute_team_indices(results_path.string());
+    std::map<std::string, double> team_indices = trainer.compute_team_indices(results);
 
     fs::remove_all(temp_dir);
 
@@ -703,8 +861,9 @@ void test_compute_driver_teams() {
         ])";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
     MarkovTrainer trainer;
-    std::map<std::string, std::string> driver_teams = trainer.compute_driver_teams(results_path.string());
+    std::map<std::string, std::string> driver_teams = trainer.compute_driver_teams(results);
 
     fs::remove_all(temp_dir);
 
@@ -720,28 +879,166 @@ void test_compute_driver_teams() {
     }
 }
 
+void test_driver_delta_distribution() {
+    std::cout << "--- Running Driver Delta Distribution Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_driver_delta_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // 4 valid rows total: delta=2 once, delta=0 three times. Pooled
+    // frequency: {2: 0.25, 0: 0.75}. Driver X has 3 valid rows (2, 0, 0);
+    // Driver Y has 1 (0); Driver Z appears only in a grid==0 row (zero
+    // evidence -- gets the pooled shape exactly).
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver X", "circuit_name": "Circuit One", "position": 1, "grid": 3, "team_name": "Team One"},
+            {"driver_name": "Driver Y", "circuit_name": "Circuit One", "position": 2, "grid": 2, "team_name": "Team Two"},
+            {"driver_name": "Driver X", "circuit_name": "Circuit Two", "position": 2, "grid": 2, "team_name": "Team One"},
+            {"driver_name": "Driver X", "circuit_name": "Circuit Three", "position": 1, "grid": 1, "team_name": "Team One"},
+            {"driver_name": "Driver Z", "circuit_name": "Circuit Four", "position": 5, "grid": 0, "team_name": "Team Two"}
+        ])";
+    }
+
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    MarkovTrainer trainer;
+    std::map<std::string, std::map<int, double>> distributions =
+        trainer.compute_driver_delta_distributions(results);
+
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    const double lambda = 0.85;
+    const double strength = 3.0;
+    bool ok = true;
+
+    // Prior mass: strength * pooled frequency, not "1 per bucket".
+    double prior2 = strength * 0.25;
+    double prior0 = strength * 0.75;
+
+    // Driver X: race0 (delta=2, k=3), race1 (delta=0, k=2), race2 (delta=0, k=1).
+    double x_delta2 = prior2 + std::pow(lambda, 3);
+    double x_delta0 = prior0 + std::pow(lambda, 2) + std::pow(lambda, 1);
+    double x_total = x_delta2 + x_delta0;
+
+    ok &= (distributions.count("Driver X") == 1);
+    const auto& x_dist = distributions.at("Driver X");
+    ok &= (x_dist.size() == 2);
+    ok &= (x_dist.count(2) == 1) && (std::fabs(x_dist.at(2) - x_delta2 / x_total) < epsilon);
+    ok &= (x_dist.count(0) == 1) && (std::fabs(x_dist.at(0) - x_delta0 / x_total) < epsilon);
+
+    // Driver Y: race0 only (delta=0, k=3); delta=2 stays pure prior.
+    double y_delta0 = prior0 + std::pow(lambda, 3);
+    double y_delta2 = prior2;
+    double y_total = y_delta0 + y_delta2;
+
+    ok &= (distributions.count("Driver Y") == 1);
+    const auto& y_dist = distributions.at("Driver Y");
+    ok &= (y_dist.count(0) == 1) && (std::fabs(y_dist.at(0) - y_delta0 / y_total) < epsilon);
+    ok &= (y_dist.count(2) == 1) && (std::fabs(y_dist.at(2) - y_delta2 / y_total) < epsilon);
+
+    // Driver Z: zero evidence -- must match the pooled shape exactly.
+    ok &= (distributions.count("Driver Z") == 1);
+    const auto& z_dist = distributions.at("Driver Z");
+    ok &= (z_dist.size() == 2);
+    ok &= (z_dist.count(0) == 1) && (std::fabs(z_dist.at(0) - 0.75) < epsilon);
+    ok &= (z_dist.count(2) == 1) && (std::fabs(z_dist.at(2) - 0.25) < epsilon);
+
+    for (const auto& [driver, dist] : distributions) {
+        double sum = 0.0;
+        for (const auto& [delta, prob] : dist) {
+            sum += prob;
+        }
+        ok &= (std::fabs(sum - 1.0) < epsilon);
+    }
+
+    if (ok) {
+        std::cout << "[PASS] compute_driver_delta_distributions matched hand-calculated recency-weighted "
+                     "posteriors and gave a zero-evidence driver the pooled field shape.\n";
+    }
+    else {
+        std::cout << "[FAIL] compute_driver_delta_distributions output did not match expectations.\n";
+    }
+}
+
+void test_team_delta_distribution() {
+    std::cout << "--- Running Team Delta Distribution Test ---\n";
+
+    namespace fs = std::filesystem;
+    fs::path temp_dir = fs::temp_directory_path() / "pitwall_team_delta_test";
+    fs::create_directories(temp_dir);
+    fs::path results_path = temp_dir / "results.json";
+
+    // Two races, two different drivers on the same team: their evidence
+    // must pool into one shared team distribution.
+    {
+        std::ofstream f(results_path);
+        f << R"([
+            {"driver_name": "Driver A", "circuit_name": "Circuit One", "position": 3, "grid": 5, "team_name": "Team Alpha"},
+            {"driver_name": "Driver B", "circuit_name": "Circuit Two", "position": 4, "grid": 5, "team_name": "Team Alpha"}
+        ])";
+    }
+
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    MarkovTrainer trainer;
+    std::map<std::string, std::map<int, double>> distributions =
+        trainer.compute_team_delta_distributions(results);
+
+    fs::remove_all(temp_dir);
+
+    const double epsilon = 1e-9;
+    const double lambda = 0.85;
+    const double strength = 3.0;
+    bool ok = true;
+
+    // Pooled frequency (2 valid rows, one each): {2: 0.5, 1: 0.5}.
+    // Driver A: delta=2, k=1 (race0, 2 races before the last). Driver B:
+    // delta=1, k=0 (race1, the most recent). Both pool into Team Alpha.
+    double delta2 = strength * 0.5 + std::pow(lambda, 1);
+    double delta1 = strength * 0.5 + std::pow(lambda, 0);
+    double total = delta1 + delta2;
+
+    ok &= (distributions.count("Team Alpha") == 1);
+    const auto& dist = distributions.at("Team Alpha");
+    ok &= (dist.size() == 2);
+    ok &= (dist.count(2) == 1) && (std::fabs(dist.at(2) - delta2 / total) < epsilon);
+    ok &= (dist.count(1) == 1) && (std::fabs(dist.at(1) - delta1 / total) < epsilon);
+
+    if (ok) {
+        std::cout << "[PASS] compute_team_delta_distributions pooled both drivers' evidence into one distribution.\n";
+    }
+    else {
+        std::cout << "[FAIL] compute_team_delta_distributions output did not match expectations.\n";
+    }
+}
+
 void test_driver_aware_prediction() {
     std::cout << "--- Running Driver-Aware Prediction Test ---\n";
 
+    // Pooled grid 5: finish 2 (30%), finish 5 (50%), finish 8 (20%).
     std::map<int, std::map<int, double>> counts;
-    // grid 1: finish 1 x2, finish 2 x2, finish 3 x4 (total 8)
-    counts[1][1] = 2;
-    counts[1][2] = 2;
-    counts[1][3] = 4;
-
+    counts[5][2] = 3;
+    counts[5][5] = 5;
+    counts[5][8] = 2;
     MarkovEngine engine(counts);
+
     const double epsilon = 1e-9;
     bool ok = true;
 
-    // driver_index = +1.0 is an exact integer shift (no fractional split);
-    // expected result: {1: 0.5, 2: 0.5}.
-    std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(1, 1.0);
+    // Delta distribution: 60% chance of gaining 1, 40% chance of gaining 3.
+    // Convolved by hand: {1: 0.30, 2: 0.20, 4: 0.30, 5: 0.08, 7: 0.12} --
+    // a split shape a single mean shift (1.8) could never produce.
+    std::map<int, double> delta_dist = { {1, 0.6}, {3, 0.4} };
+    std::map<int, double> shifted = engine.predict_finish_distribution_for_driver(5, delta_dist);
 
-    ok &= (shifted.size() == 2);
-    ok &= (shifted.count(1) == 1);
-    ok &= (std::fabs(shifted.at(1) - 0.5) < epsilon);
-    ok &= (shifted.count(2) == 1);
-    ok &= (std::fabs(shifted.at(2) - 0.5) < epsilon);
+    ok &= (shifted.size() == 5);
+    ok &= (shifted.count(1) == 1) && (std::fabs(shifted.at(1) - 0.30) < epsilon);
+    ok &= (shifted.count(2) == 1) && (std::fabs(shifted.at(2) - 0.20) < epsilon);
+    ok &= (shifted.count(4) == 1) && (std::fabs(shifted.at(4) - 0.30) < epsilon);
+    ok &= (shifted.count(5) == 1) && (std::fabs(shifted.at(5) - 0.08) < epsilon);
+    ok &= (shifted.count(7) == 1) && (std::fabs(shifted.at(7) - 0.12) < epsilon);
 
     double sum = 0.0;
     for (const auto& [finish, prob] : shifted) {
@@ -750,61 +1047,25 @@ void test_driver_aware_prediction() {
     }
     ok &= (std::fabs(sum - 1.0) < epsilon);
 
-    // Large positive index clamps everything to P1.
-    std::map<int, double> fully_clamped = engine.predict_finish_distribution_for_driver(1, 10.0);
-    ok &= (fully_clamped.size() == 1);
-    ok &= (fully_clamped.count(1) == 1);
-    ok &= (std::fabs(fully_clamped.at(1) - 1.0) < epsilon);
-
-    // Unseen grid position returns an empty map, no throw.
-    std::map<int, double> unseen = engine.predict_finish_distribution_for_driver(99, 2.0);
-    ok &= unseen.empty();
-
-    // --- Fractional shift with mass interpolation ---
+    // A large single-value delta clamps everything to P1.
     std::map<int, std::map<int, double>> counts2;
-    counts2[5][2] = 2;
-    counts2[5][5] = 3;
-    counts2[5][8] = 5;
-
+    counts2[1][1] = 2;
+    counts2[1][2] = 2;
+    counts2[1][3] = 4;
     MarkovEngine engine2(counts2);
 
-    // driver_index = 2.4: each bucket's mass splits across the two
-    // straddling integer positions; expected result computed by hand as
-    // {1: 0.2, 2: 0.12, 3: 0.18, 5: 0.2, 6: 0.3}.
-    std::map<int, double> fractional = engine2.predict_finish_distribution_for_driver(5, 2.4);
+    std::map<int, double> huge_delta = { {10, 1.0} };
+    std::map<int, double> fully_clamped = engine2.predict_finish_distribution_for_driver(1, huge_delta);
+    ok &= (fully_clamped.size() == 1);
+    ok &= (fully_clamped.count(1) == 1) && (std::fabs(fully_clamped.at(1) - 1.0) < epsilon);
 
-    ok &= (fractional.size() == 5);
-    ok &= (fractional.count(1) == 1) && (std::fabs(fractional.at(1) - 0.2) < epsilon);
-    ok &= (fractional.count(2) == 1) && (std::fabs(fractional.at(2) - 0.12) < epsilon);
-    ok &= (fractional.count(3) == 1) && (std::fabs(fractional.at(3) - 0.18) < epsilon);
-    ok &= (fractional.count(5) == 1) && (std::fabs(fractional.at(5) - 0.2) < epsilon);
-    ok &= (fractional.count(6) == 1) && (std::fabs(fractional.at(6) - 0.3) < epsilon);
-
-    double fractional_sum = 0.0;
-    for (const auto& [finish, prob] : fractional) {
-        ok &= (finish >= 1 && finish <= 8);
-        fractional_sum += prob;
-    }
-    ok &= (std::fabs(fractional_sum - 1.0) < epsilon);
-
-    // A fractional index must not collapse to its rounded integer
-    // counterpart's result -- proves the shift uses full precision, not
-    // std::llround (which would make 1.5 and 2.0 indistinguishable).
-    std::map<int, double> frac_index = engine.predict_finish_distribution_for_driver(1, 1.5);
-    std::map<int, double> rounded_index = engine.predict_finish_distribution_for_driver(1, 2.0);
-
-    ok &= (frac_index.size() == 2);
-    ok &= (frac_index.count(1) == 1) && (std::fabs(frac_index.at(1) - 0.75) < epsilon);
-    ok &= (frac_index.count(2) == 1) && (std::fabs(frac_index.at(2) - 0.25) < epsilon);
-
-    ok &= (rounded_index.size() == 1);
-    ok &= (rounded_index.count(1) == 1) && (std::fabs(rounded_index.at(1) - 1.0) < epsilon);
-
-    ok &= (frac_index != rounded_index);
+    // Unseen grid position returns an empty map, no throw.
+    std::map<int, double> unseen = engine2.predict_finish_distribution_for_driver(99, delta_dist);
+    ok &= unseen.empty();
 
     if (ok) {
-        std::cout << "[PASS] predict_finish_distribution_for_driver split fractional mass correctly, "
-                     "respected the P1 clamp, conserved total probability, and diverged from its rounded counterpart.\n";
+        std::cout << "[PASS] predict_finish_distribution_for_driver convolved the delta distribution correctly, "
+                     "respected the P1 clamp, and conserved total probability.\n";
     }
     else {
         std::cout << "[FAIL] predict_finish_distribution_for_driver output did not match expectations.\n";
@@ -814,9 +1075,10 @@ void test_driver_aware_prediction() {
 void test_driver_index_real() {
     std::cout << "--- Running Real Data Driver Index Smoke Test ---\n";
 
+    std::vector<ResultRow> results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
     MarkovTrainer trainer;
-    trainer.train(resolve_repo_path("data/results.json"));
-    std::map<std::string, double> indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
+    trainer.train(results);
+    std::map<std::string, double> indices = trainer.compute_driver_indices(results);
 
     std::vector<std::pair<std::string, double>> sorted_indices(indices.begin(), indices.end());
     std::sort(sorted_indices.begin(), sorted_indices.end(),
@@ -882,9 +1144,13 @@ void test_strategy_reporter() {
     counts[5][8] = 2;
     MarkovEngine engine(counts);
 
+    // Mean 1.85 (rounds to 1.9); convolving it against the pooled table
+    // below puts most mass on P2, matching the assertions further down.
+    std::map<int, double> delta_dist = { {1, 0.15}, {2, 0.85} };
+
     std::map<std::string, DriverAdjustment> indices;
-    indices["Test Driver"] = { 1.85, false }; // rounds to 1.9, own data
-    indices["Rookie Driver"] = { 1.85, true }; // same shift, but via team fallback
+    indices["Test Driver"] = { 1.85, delta_dist, false };
+    indices["Rookie Driver"] = { 1.85, delta_dist, true }; // same shift, via team fallback
 
     StrategyReporter reporter(engine, indices);
 
@@ -957,13 +1223,26 @@ void test_strategy_reporter() {
 void test_strategy_reporter_real() {
     std::cout << "--- Running Real Data Strategy Reporter Smoke Test ---\n";
 
+    std::vector<ResultRow> results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
     MarkovTrainer trainer;
-    trainer.train(resolve_repo_path("data/results.json"));
-    std::map<std::string, double> raw_indices = trainer.compute_driver_indices(resolve_repo_path("data/results.json"));
+    trainer.train(results);
+    std::map<std::string, double> raw_indices = trainer.compute_driver_indices(results);
+    std::map<std::string, std::map<int, double>> raw_deltas = trainer.compute_driver_delta_distributions(results);
+
+    // Index derived from the same distribution used for the shift, matching
+    // PitWallService, so narration and shift can never quietly disagree.
+    auto mean_of = [](const std::map<int, double>& dist) {
+        double mean = 0.0;
+        for (const auto& [delta, prob] : dist) {
+            mean += delta * prob;
+        }
+        return mean;
+    };
 
     std::map<std::string, DriverAdjustment> indices;
     for (const auto& [driver, idx] : raw_indices) {
-        indices[driver] = { idx, false };
+        const auto& dist = raw_deltas.at(driver);
+        indices[driver] = { mean_of(dist), dist, false };
     }
 
     MarkovEngine engine(trainer.get_counts());
@@ -1023,8 +1302,9 @@ void test_compare() {
     // Only "Fast Driver" has an index; "Slow Driver" is unindexed
     // (fewer than 10 races), so it must fall back to the pooled distribution
     // and report the honest no-adjustment note.
+    std::map<int, double> fast_delta = { {1, 1.0} };  // exact shift: {2,4} -> {1,3}, expected 1.8
     std::map<std::string, DriverAdjustment> indices;
-    indices["Fast Driver"] = { 1.0, false };  // exact integer shift: {2,4} -> {1,3}, expected 1.8
+    indices["Fast Driver"] = { 1.0, fast_delta, false };
 
     StrategyReporter reporter(engine, indices);
 
@@ -1052,7 +1332,8 @@ void test_compare() {
 
     // --- Team-fallback driver in a comparison gets its own labeled note,
     // distinct from both the own-data driver and the no-data driver ---
-    indices["Team Rookie"] = { 0.5, true };
+    std::map<int, double> rookie_delta = { {0, 0.5}, {1, 0.5} };
+    indices["Team Rookie"] = { 0.5, rookie_delta, true };
     std::string fallback_report = reporter.compare(3, "Fast Driver", 3, "Team Rookie");
     bool fallback_ok = true;
     fallback_ok &= (fallback_report.find("Team Rookie's adjustment is based on team-level form") != std::string::npos);
@@ -1093,7 +1374,8 @@ void test_dirichlet_finish_model() {
         ])";
     }
 
-    DirichletFinishModel model(results_path.string());
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    DirichletFinishModel model(results);
 
     fs::remove_all(temp_dir);
 
@@ -1200,7 +1482,8 @@ void test_dirichlet_recency_weighting() {
         ])";
     }
 
-    DirichletFinishModel model(results_path.string());
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    DirichletFinishModel model(results);
     fs::remove_all(temp_dir);
 
     const double epsilon = 1e-9;
@@ -1282,11 +1565,13 @@ void test_championship_simulator() {
         f << "[" << rows.str() << "]";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+
     const double epsilon = 1e-9;
     bool ok = true;
 
     const unsigned int seed = 12345;
-    ChampionshipSimulator sim1(results_path.string(), seed);
+    ChampionshipSimulator sim1(results, seed);
     std::map<std::string, double> probs = sim1.simulate_championship(10, 1000);
 
     ok &= (probs.size() == 2);
@@ -1301,7 +1586,7 @@ void test_championship_simulator() {
 
     // Determinism: a fresh simulator built from the same data and the same
     // seed must reproduce the exact same result.
-    ChampionshipSimulator sim2(results_path.string(), seed);
+    ChampionshipSimulator sim2(results, seed);
     std::map<std::string, double> probs_repeat = sim2.simulate_championship(10, 1000);
     ok &= (probs_repeat == probs);
 
@@ -1339,13 +1624,15 @@ void test_championship_clinch() {
         ])";
     }
 
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+
     const double epsilon = 1e-9;
     bool ok = true;
 
     // Two different seeds: if the result depends on the seed at all, the
     // clinch constraint isn't actually short-circuiting the RNG.
-    ChampionshipSimulator sim_a(results_path.string(), /*seed=*/1);
-    ChampionshipSimulator sim_b(results_path.string(), /*seed=*/999);
+    ChampionshipSimulator sim_a(results, /*seed=*/1);
+    ChampionshipSimulator sim_b(results, /*seed=*/999);
 
     std::map<std::string, double> probs_a = sim_a.simulate_championship(2, 1000);
     std::map<std::string, double> probs_b = sim_b.simulate_championship(2, 1000);
@@ -1389,7 +1676,8 @@ void test_championship_elimination() {
         ])";
     }
 
-    ChampionshipSimulator sim(results_path.string(), /*seed=*/7);
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    ChampionshipSimulator sim(results, /*seed=*/7);
     std::map<std::string, double> probs = sim.simulate_championship(2, 1000);
 
     const double epsilon = 1e-9;
@@ -1437,7 +1725,8 @@ void test_championship_points_through_race() {
         ])";
     }
 
-    ChampionshipSimulator sim(results_path.string());
+    std::vector<ResultRow> results = load_test_results(temp_dir);
+    ChampionshipSimulator sim(results);
 
     bool ok = true;
     ok &= (sim.race_count() == 2);
@@ -1467,7 +1756,8 @@ void test_championship_points_through_race() {
 void test_championship_real() {
     std::cout << "--- Running Real Data Championship Simulator Smoke Test ---\n";
 
-    ChampionshipSimulator sim(resolve_repo_path("data/results.json"), /*seed=*/42);
+    std::vector<ResultRow> real_results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
+    ChampionshipSimulator sim(real_results, /*seed=*/42);
 
     auto print_top8 = [](const std::string& label, const std::map<std::string, double>& probs) {
         std::vector<std::pair<std::string, double>> sorted(probs.begin(), probs.end());
@@ -1492,4 +1782,120 @@ void test_championship_real() {
     std::cout << "\n";
     std::map<std::string, double> mid_season = sim.simulate_championship(mid_race, 10000);
     print_top8("Title probability, simulated from race " + std::to_string(mid_race) + " (mid-season split)", mid_season);
+}
+
+void test_championship_calibration_2024_real() {
+    std::cout << "--- Running Championship Calibration Test (Real 2024 Data) ---\n";
+
+    std::vector<ResultRow> results = load_test_results(std::filesystem::path(resolve_repo_path("data")));
+    ChampionshipSimulator sim(results, /*seed=*/42);
+
+    const std::string champion = "Max Verstappen";  // real 2024 champion
+    const int num_simulations = 10000;
+
+    // Checkpoints spanning the season -- the same 20/40/60/80/95% shape
+    // main.cpp's demo uses for a 24-race season.
+    std::vector<int> checkpoints = { 5, 10, 14, 19, 23 };
+    std::vector<double> champion_probs;
+    std::map<std::string, double> final_probs;
+
+    for (int checkpoint : checkpoints) {
+        std::map<std::string, double> probs = sim.simulate_championship(checkpoint, num_simulations);
+        champion_probs.push_back(probs.count(champion) ? probs.at(champion) : 0.0);
+        if (checkpoint == checkpoints.back()) {
+            final_probs = probs;
+        }
+    }
+
+    bool ok = true;
+
+    // Honest early uncertainty: even a dominant driver hasn't clinched
+    // anything after only 5 of 24 races.
+    ok &= (champion_probs[0] < 0.70);
+
+    // Real mid-season dip (race 14->19, McLaren's documented late-season
+    // surge), not a manufactured march to 100% -- proves the model tracks
+    // real signal instead of smoothing toward its eventual answer.
+    ok &= (champion_probs[3] < champion_probs[2]);
+
+    // Real conviction by the second-to-last checkpoint, not just "the
+    // season is basically over."
+    ok &= (champion_probs[3] > 0.85);
+
+    // The model's own favorite, not just Verstappen's raw share, must be
+    // the real champion -- proof it picks the right driver outright.
+    double top_prob = -1.0;
+    std::string top_driver;
+    for (const auto& [driver, prob] : final_probs) {
+        if (prob > top_prob) {
+            top_prob = prob;
+            top_driver = driver;
+        }
+    }
+    ok &= (top_driver == champion);
+
+    if (ok) {
+        std::cout << "[PASS] Championship model stayed honestly uncertain early, tracked a real mid-season form dip "
+                     "instead of smoothing over it, and correctly converged on Max Verstappen as the outright favorite.\n";
+    }
+    else {
+        std::cout << "[FAIL] Championship calibration against the real 2024 season did not match expectations.\n";
+    }
+}
+
+void test_championship_calibration_2012_real() {
+    std::cout << "--- Running Championship Calibration Test (Real 2012 Data -- Closest Title Fight in F1 History) ---\n";
+
+    std::vector<ResultRow> results = load_test_results(std::filesystem::path(resolve_repo_path("data_2012")));
+    ChampionshipSimulator sim(results, /*seed=*/42);
+
+    const std::string champion = "Sebastian Vettel";  // real 2012 champion, by 3 points
+    const int num_simulations = 10000;
+
+    std::vector<int> checkpoints = { 4, 8, 12, 16, 19 };
+    std::vector<double> champion_probs;
+    std::map<std::string, double> final_probs;
+
+    for (int checkpoint : checkpoints) {
+        std::map<std::string, double> probs = sim.simulate_championship(checkpoint, num_simulations);
+        champion_probs.push_back(probs.count(champion) ? probs.at(champion) : 0.0);
+        if (checkpoint == checkpoints.back()) {
+            final_probs = probs;
+        }
+    }
+
+    bool ok = true;
+
+    // The real fight went to the final race by 3 points; false certainty
+    // this early would mean the model isn't reading how close it was.
+    ok &= (champion_probs[0] < 0.50);
+
+    // Vettel's own odds genuinely fall from race 4 to race 8 -- real
+    // mid-season form, not noise to smooth away.
+    ok &= (champion_probs[1] < champion_probs[0]);
+
+    // Conviction stays well short of 2024's blowout-level certainty --
+    // confidence should track how close the real fight actually was.
+    ok &= (champion_probs[4] < 0.95);
+
+    // Still must get the outright favorite right, even in the closest
+    // title fight in F1 history -- the actual proof, not just a decent number.
+    double top_prob = -1.0;
+    std::string top_driver;
+    for (const auto& [driver, prob] : final_probs) {
+        if (prob > top_prob) {
+            top_prob = prob;
+            top_driver = driver;
+        }
+    }
+    ok &= (top_driver == champion);
+
+    if (ok) {
+        std::cout << "[PASS] Championship model showed appropriately deep uncertainty through a genuinely close "
+                     "title fight, never overclaimed blowout-level certainty, and still correctly converged on "
+                     "Sebastian Vettel as the outright favorite.\n";
+    }
+    else {
+        std::cout << "[FAIL] Championship calibration against the real 2012 season did not match expectations.\n";
+    }
 }
