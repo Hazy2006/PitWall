@@ -9,31 +9,48 @@ namespace {
         }
         return mean;
     }
+
+    // One real file per season name (e.g. "data" -> pitwall_data.db,
+    // "data_2012" -> pitwall_data_2012.db), so editing one season's data can
+    // never leak into another's.
+    std::string db_path_for(const std::string& season_name) {
+        std::string sanitized = season_name;
+        for (char& c : sanitized) {
+            if (c == '/' || c == '\\') {
+                c = '_';
+            }
+        }
+        return "pitwall_" + sanitized + ".db";
+    }
 }
 
-PitWallService::PitWallService() : storage_(":memory:"), results_importer_(storage_) {}
+PitWallService::PitWallService() {}
 
 void PitWallService::load(const std::string& data_dir) {
     std::string resolved_dir = resolve_repo_path(data_dir);
-    std::vector<ResultRow> results = loadResults(resolved_dir);
+    std::vector<ResultRow> results = loadResults(data_dir, resolved_dir);
     trainModel(results);
     buildReporter();
 }
 
-std::vector<ResultRow> PitWallService::loadResults(const std::string& data_dir) {
-    results_importer_.create_tables();
-    results_importer_.import_from_json(data_dir);
-    return results_importer_.load_results();
+std::vector<ResultRow> PitWallService::loadResults(const std::string& season_name, const std::string& resolved_dir) {
+    storage_.emplace(db_path_for(season_name));
+    results_importer_.emplace(*storage_);
+
+    results_importer_->create_tables();
+    results_importer_->import_from_json(resolved_dir);
+    return results_importer_->load_results();
 }
 
 void PitWallService::trainModel(const std::vector<ResultRow>& results) {
-    trainer_.train(results);
+    trainer_.emplace();
+    trainer_->train(results);
 
-    std::map<std::string, double> driver_only = trainer_.compute_driver_indices(results);
-    std::map<std::string, double> team_only = trainer_.compute_team_indices(results);
-    std::map<std::string, std::string> driver_teams = trainer_.compute_driver_teams(results);
-    std::map<std::string, std::map<int, double>> driver_deltas = trainer_.compute_driver_delta_distributions(results);
-    std::map<std::string, std::map<int, double>> team_deltas = trainer_.compute_team_delta_distributions(results);
+    std::map<std::string, double> driver_only = trainer_->compute_driver_indices(results);
+    std::map<std::string, double> team_only = trainer_->compute_team_indices(results);
+    std::map<std::string, std::string> driver_teams = trainer_->compute_driver_teams(results);
+    std::map<std::string, std::map<int, double>> driver_deltas = trainer_->compute_driver_delta_distributions(results);
+    std::map<std::string, std::map<int, double>> team_deltas = trainer_->compute_team_delta_distributions(results);
 
     driver_indices_.clear();
     for (const auto& [driver, team] : driver_teams) {
@@ -52,7 +69,7 @@ void PitWallService::trainModel(const std::vector<ResultRow>& results) {
         }
     }
 
-    engine_.emplace(trainer_.get_counts());
+    engine_.emplace(trainer_->get_counts());
     simulator_.emplace(results);
 }
 
@@ -74,4 +91,14 @@ std::map<std::string, double> PitWallService::simulate_championship(int from_rac
 
 int PitWallService::race_count() const {
     return simulator_->race_count();
+}
+
+std::vector<std::map<std::string, std::string>> PitWallService::run_sql(const std::string& sql) {
+    return storage_->query(sql);
+}
+
+void PitWallService::reload() {
+    std::vector<ResultRow> results = results_importer_->load_results();
+    trainModel(results);
+    buildReporter();
 }

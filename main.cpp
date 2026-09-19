@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -77,6 +78,80 @@ namespace {
 		}
 		return checkpoints;
 	}
+
+	// Lets you edit the live database and see predictions react, all from
+	// the console -- no external SQL tool needed. Commands:
+	//   <any SQL statement>     run it against the database directly
+	//   reload                  recompute predictions from the database now
+	//   report <grid> <driver>  single-driver report
+	//   odds <race>             title odds as of that race
+	//   quit                    exit
+	void run_interactive_console(PitWallService& service) {
+		std::cout << "\n-- Interactive database console --\n";
+		std::cout << "Type SQL to edit the live database (e.g. UPDATE drivers SET name='Foo' WHERE name='Max Verstappen';),\n";
+		std::cout << "'reload' to recompute predictions from it, 'report <grid> <driver>', 'odds <race>', or 'quit'.\n\n";
+
+		std::string line;
+		while (true) {
+			std::cout << "> ";
+			if (!std::getline(std::cin, line) || line == "quit" || line == "exit") {
+				break;
+			}
+			if (line.empty()) {
+				continue;
+			}
+
+			if (line == "reload") {
+				service.reload();
+				std::cout << "Predictions recomputed from the database's current contents.\n";
+				continue;
+			}
+
+			if (line.rfind("report ", 0) == 0) {
+				std::istringstream iss(line.substr(7));
+				int grid;
+				if (!(iss >> grid)) {
+					std::cout << "Usage: report <grid> <driver name>\n";
+					continue;
+				}
+				std::string driver_name;
+				std::getline(iss, driver_name);
+				size_t start = driver_name.find_first_not_of(' ');
+				driver_name = (start == std::string::npos) ? "" : driver_name.substr(start);
+				std::cout << service.report(grid, driver_name) << "\n";
+				continue;
+			}
+
+			if (line.rfind("odds ", 0) == 0) {
+				std::istringstream iss(line.substr(5));
+				int race;
+				if (!(iss >> race)) {
+					std::cout << "Usage: odds <race number>\n";
+					continue;
+				}
+				print_title_odds("Title odds after race " + std::to_string(race), service.simulate_championship(race, 10000));
+				continue;
+			}
+
+			try {
+				auto rows = service.run_sql(line);
+				if (rows.empty()) {
+					std::cout << "OK.\n";
+				}
+				else {
+					for (const auto& row : rows) {
+						for (const auto& [col, val] : row) {
+							std::cout << col << "=" << val << "  ";
+						}
+						std::cout << "\n";
+					}
+				}
+			}
+			catch (const std::exception& e) {
+				std::cout << "Error: " << e.what() << "\n";
+			}
+		}
+	}
 }
 
 int main(int argc, char** argv) {
@@ -100,6 +175,8 @@ int main(int argc, char** argv) {
 	for (int race : checkpoints_for(total_races)) {
 		print_title_odds("Title odds after race " + std::to_string(race), service.simulate_championship(race, 10000));
 	}
+
+	run_interactive_console(service);
 
 	return 0;
 }

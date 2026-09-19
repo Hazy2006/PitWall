@@ -38,14 +38,33 @@ public:
 
     int race_count() const;
 
+    // Debug/experimentation hook: runs one raw SQL statement against the
+    // season's persistent database and returns any rows it produced (empty
+    // for non-SELECT statements). Lets an interactive console edit data
+    // without an external SQL tool.
+    std::vector<std::map<std::string, std::string>> run_sql(const std::string& sql);
+
+    // Recomputes every prediction from the database's current contents,
+    // without touching JSON or re-importing. Call after run_sql() edits
+    // something you want reflected in report()/compare()/simulate_championship().
+    void reload();
+
 private:
-    std::vector<ResultRow> loadResults(const std::string& data_dir);
+    std::vector<ResultRow> loadResults(const std::string& season_name, const std::string& resolved_dir);
     void trainModel(const std::vector<ResultRow>& results);
     void buildReporter();
 
-    Storage storage_;
-    ResultsImporter results_importer_;
-    MarkovTrainer trainer_;
+    // One real file per season (see db_path_for() in service.cpp), not
+    // :memory: -- results.json only gets imported the first time a season's
+    // file doesn't exist yet; every run after that reuses whatever is
+    // currently in that file, edits included.
+    std::optional<Storage> storage_;
+    std::optional<ResultsImporter> results_importer_;
+    // Rebuilt fresh in trainModel() every load()/reload() -- MarkovTrainer
+    // accumulates into its transition table across train() calls rather
+    // than replacing it, so reusing one instance across reloads would blend
+    // pre-edit and post-edit data together permanently.
+    std::optional<MarkovTrainer> trainer_;
     std::map<std::string, DriverAdjustment> driver_indices_;
     std::optional<MarkovEngine> engine_;
     std::optional<ChampionshipSimulator> simulator_;

@@ -1098,7 +1098,10 @@ void test_driver_index_real() {
     }
 
     // Integration check: the full service pipeline should produce reports
-    // consistent with the strong/weak drivers' computed indices.
+    // consistent with the strong/weak drivers' computed indices. Force a
+    // fresh JSON import regardless of any hand-edited pitwall_data.db left
+    // over from interactive console experiments.
+    std::filesystem::remove("pitwall_data.db");
     PitWallService service;
     service.load("data");
 
@@ -1269,6 +1272,9 @@ void test_strategy_reporter_real() {
 
     // Bearman has <10 personal races but his team (Haas) has plenty --
     // the service should use team-level form instead of no adjustment.
+    // Force a fresh JSON import regardless of any hand-edited
+    // pitwall_data.db left over from interactive console experiments.
+    std::filesystem::remove("pitwall_data.db");
     PitWallService service;
     service.load("data");
     std::string bearman_report = service.report(10, "Oliver Bearman");
